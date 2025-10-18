@@ -1,10 +1,759 @@
-GitHub test text 
+// DrayagePro TMS by Hudson Insights — single-file preview (React + TSX)
+// App shell with Login, Loads, Carriers, Customers, Billing.
+// This rewrite eliminates any regex literals and backtick template strings
+// (which some bundlers mis-tokenize as unterminated regex) and fixes all
+// previously reported parse errors. It keeps: money snap-to-2-decimals (UI),
+// billable mirror to invoice (Draft only), invoice status guard & badges,
+// BOL/Invoice PDF, margin %, Dray Import/Export, origin/stop1/destination labels,
+// MC#/DOT# on carriers, quick-add billables with Linehaul default.
 
-<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DrayagePro</title>
-<h1>DrayagePro is live 🎉</h1>
-<p>If you can see this page, GitHub Pages is working.</p>
-</html>
+import React, { useEffect, useMemo, useState } from "react";
+
+/*********************** Tiny UI primitives ************************/ 
+const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary'|'outline'|'danger'|'ghost', size?: 'sm'|'md'|'icon' }> = ({ variant='primary', size='md', className='', children, ...rest }) => (
+  <button {...rest} className={[
+    'inline-flex items-center justify-center select-none border rounded-md transition-colors',
+    variant==='primary' && 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700',
+    variant==='danger' && 'bg-red-600 text-white border-red-700 hover:bg-red-700',
+    variant==='outline' && 'bg-white text-gray-900 border-gray-300 hover:bg-gray-50',
+    variant==='ghost' && 'bg-transparent text-gray-900 border-transparent hover:bg-gray-50',
+    size==='sm' ? 'h-8 px-2 text-sm' : size==='icon' ? 'h-8 w-8 p-0' : 'h-9 px-3',
+    className
+  ].filter(Boolean).join(' ')}>{children}</button>
+);
+const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (p)=> <input {...p} className={["h-9 px-3 border rounded-md w-full", p.className||''].join(' ')} />;
+const NumberInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (p)=> <input {...p} inputMode="decimal" className={["h-9 px-3 border rounded-md w-full text-right", p.className||''].join(' ')} />;
+const TextArea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>> = (p)=> <textarea {...p} className={["min-h-[72px] px-3 py-2 border rounded-md w-full", p.className||''].join(' ')} />;
+const Label: React.FC<React.HTMLAttributes<HTMLLabelElement>> = ({className='', ...rest})=> <label {...rest} className={["block text-sm font-medium text-gray-700", className].join(' ')} />;
+const Card: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({className='', ...rest})=> <div {...rest} className={["border rounded-lg bg-white", className].join(' ')} />;
+const CardBody: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({className='', ...rest})=> <div {...rest} className={["p-4", className].join(' ')} />;
+const Badge: React.FC<{tone?:'ok'|'warn'|'danger'|'muted'|'bad'}> = ({tone='muted', children}) => {
+  const map = { ok:'bg-green-100 text-green-800', warn:'bg-yellow-100 text-yellow-800', danger:'bg-red-100 text-red-800', muted:'bg-gray-100 text-gray-700', bad:'bg-red-100 text-red-800' } as const;
+  return <span className={["text-xs px-2 py-0.5 rounded", map[tone]].join(' ')}>{children}</span>;
+};
+const Modal: React.FC<{open:boolean; onClose:()=>void; title?:React.ReactNode; width?:number; children:React.ReactNode}> = ({open,onClose,title,children,width=760})=>{
+  if(!open) return null; return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose}/>
+      <Card className="relative w-full" style={{maxWidth:width}}>
+        <CardBody>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="font-semibold">{title||''}</h4>
+            <Btn variant="outline" onClick={onClose}>Close</Btn>
+          </div>
+          {children}
+        </CardBody>
+      </Card>
+    </div>
+  );
+};
+
+/*********************** Utils & Types ************************/ 
+const isClient = () => typeof window !== 'undefined' && !!window.localStorage;
+const round2 = (n:any) => Math.round((Number(n)||0)*100)/100;
+// regex-free parseMoney (robust for $, commas, negatives, decimals)
+const parseMoney = (s:any) => {
+  const t = String(s ?? '');
+  // remove commas quickly
+  const noCommas = t.split(',').join('');
+  // try plain Number first
+  const quick = Number(noCommas);
+  if (!Number.isNaN(quick) && Number.isFinite(quick)) return round2(quick);
+  // manual scan: allow leading -, digits, one dot
+  let out=''; let seenDot=false;
+  for(let i=0;i<noCommas.length;i++){
+    const ch=noCommas[i];
+    if((ch>='0'&&ch<='9') || (ch==='-'&&out==='') || (ch==='.'&&!seenDot)){
+      out+=ch; if(ch==='.') seenDot=true;
+    }
+  }
+  const num=parseFloat(out||'0');
+  return round2(Number.isFinite(num)? num: 0);
+};
+const moneyStr  = (n:any) => round2(n || 0).toFixed(2);
+const snapMoneyBlur = (e: React.FocusEvent<HTMLInputElement>) => { try { const el = e.target as HTMLInputElement; el.value = moneyStr(parseMoney(el.value)); } catch {} };
+const margin = (cust:number,carr:number)=> round2((cust||0)-(carr||0));
+const marginPct = (cust:number,carr:number)=>{ const c=Number(cust)||0; if(c<=0) return 0; return round2(((c-(Number(carr)||0))/c)*100); };
+const BILLABLE_TYPES = ['Linehaul','Fuel','Detention','Accessorial','Lumper','Chassis','Stopoff','Storage','Waiting','Other'];
+
+export type Customer = { id: string; name: string; creditActive?: boolean };
+export type Carrier = { id: string; name: string; mcNumber?: string; dotNumber?: string; bondDocUrl?: string; autoInsProvider?: string; autoPolicyNo?: string; autoExp?: string; cargoInsProvider?: string; cargoPolicyNo?: string; cargoExp?: string; flagged?: boolean };
+export type Billable = { id: string; type: string; description?: string; note?: string; carrier?: number; customer?: number };
+export type Load = { id: string; ref?: string; customerId: string; carrierId?: string; mode: string; trade?: 'Import'|'Export'; origin?: string; stop1?: string; destination?: string; pickup?: string; delivery?: string; status: string; equipment?: string; containerNo?: string; trailerNo?: string; carrierRate?: number; customerRate?: number; billables: Billable[] };
+export type InvoiceLine = { id: string; type: string; description?: string; note?: string; amount: number };
+export type Invoice = { id: string; ref?: string; customer: string; status: 'Draft'|'Sent'|'Paid'|'Void'; lines: InvoiceLine[]; taxPct: number; discount: number; total: number; audit?: string[] };
+export type User = { username: string; password: string; isAdmin?: boolean };
+
+/*********************** Seeds ************************/ 
+const seedCustomers: Customer[] = [
+  { id:'CUST-1001', name:'Hudson Insights', creditActive:true }
+];
+const seedCarriers: Carrier[] = [
+  { id:'CAR-2001', name:'Windy City Drayage', mcNumber:'123456', dotNumber:'7654321' }
+];
+const seedLoads: Load[] = [
+  { id:'LOAD-3001', ref:'PO-7781', customerId:'CUST-1001', carrierId:'CAR-2001', mode:'Dray', trade:'Import', origin:'CN-LBT Pier E', stop1:'UP Global 1', destination:'CIC Chicago', pickup:'2025-10-18', delivery:'2025-10-20', status:'planned', equipment:'Container', containerNo:'MSCU1234567', trailerNo:'CH-0091', carrierRate:550, customerRate:775, billables:[{ id:'B100001', type:'Linehaul', description:'Linehaul', note:'', carrier:550, customer:775 }]}
+];
+const seedInvoices: Invoice[] = [
+  { id:'INV-9001', ref:'LOAD-3001', customer:'Hudson Insights', status:'Draft', taxPct:0, discount:0, total:775, lines:[{ id:'L1', type:'Linehaul', description:'Load charge', note:'Auto-created from LOAD-3001', amount:775 }]}
+];
+const seedUsers: User[] = [
+  { username:'g.desgrosseilliers', password:'Lincoln082024', isAdmin:true }
+];
+
+/*********************** localStorage hook ************************/ 
+function useLocalStorage<T>(key:string, seed:T){
+  const [value,setValue] = useState<T>(()=>{ if(!isClient()) return seed; try{ const raw=window.localStorage.getItem(key); return raw? JSON.parse(raw): seed; }catch{ return seed; } });
+  useEffect(()=>{ if(!isClient()) return; try{ window.localStorage.setItem(key, JSON.stringify(value)); }catch{} },[key,value]);
+  const save=(next:T)=>{ setValue(next); if(!isClient()) return; try{ window.localStorage.setItem(key, JSON.stringify(next)); }catch{} };
+  return { value, save };
+}
+
+/*********************** CSV & PDF helpers ************************/ 
+const createCSV=(rows:any[])=>{ if(!rows?.length) return ''; const headers=Object.keys(rows[0]); const esc=(v:any)=> '"'+ String(v??'').split('"').join('""') + '"'; return [headers.join(','), ...rows.map(r=> headers.map(k=>esc((r as any)[k])).join(','))].join('\n'); };
+const csvDownload=(rows:any[], name:string)=>{ const csv=createCSV(rows); if(!csv) return; const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'})); const a=document.createElement('a'); a.href=url; a.download=name+".csv"; a.click(); URL.revokeObjectURL(url); };
+
+async function printBOL(load: Partial<Load> & {customer?:string; carrier?:string}){
+  let jsPDF:any=null; try{ jsPDF=(await import('jspdf')).default; }catch{}
+  const watermark='Created in DrayagePro TMS by Hudson Insights';
+  if(jsPDF){ const d=new jsPDF(); d.setFontSize(16); d.text('Bill of Lading',14,18); d.setFontSize(10);
+    try{ d.setTextColor(200,200,200); d.setFontSize(28); d.text(watermark,18,160,{angle:30} as any); d.setTextColor(0,0,0);}catch{}
+    d.text('Load ID: '+(load.id||''),14,26); if(load.ref) d.text('Reference: '+load.ref,14,32);
+    d.text('Customer: '+(load.customer||''),14,38); if(load.carrier) d.text('Carrier: '+load.carrier,14,44);
+    d.text('Origin: '+(load.origin||''),14,52); d.text('Stop #1: '+(load.stop1||''),14,58);
+    d.text('Destination/Return Location: '+(load.destination||''),14,64);
+    d.text('Pickup: '+(load.pickup||''),14,70); if(load.delivery) d.text('Delivery: '+load.delivery,14,76);
+    d.text('Equipment: '+(load.equipment||''),14,84);
+    if(load.containerNo) d.text('Container #: '+load.containerNo,14,90); if(load.trailerNo) d.text('Trailer #: '+load.trailerNo,14,96);
+    d.text('Pieces: ______  Weight: ______  NMFC: ______',14,108);
+    d.text('Shipper Signature: __________  Date: ______',14,124);
+    d.text('Carrier Signature: __________  Date: ______',14,132);
+    d.save(String(load.id||'BOL')+'-BOL.pdf'); return; }
+  if(!isClient()) return; try{
+    const w=window.open('about:blank','_blank'); if(!w) return;
+    const parts:string[]=[];
+    parts.push('<!doctype html><title>'); parts.push(String(load.id||'BOL')); parts.push('</title><body style="font-family:Arial">');
+    parts.push('<h2>Bill of Lading</h2>');
+    parts.push('<div>Load: '+(load.id||'')+'</div>');
+    parts.push('<div>Ref: '+(load.ref||'')+'</div>');
+    parts.push('<div>Customer: '+(load.customer||'')+'</div>');
+    parts.push('<div>Carrier: '+(load.carrier||'')+'</div>');
+    parts.push('<div>Origin: '+(load.origin||'')+'</div>');
+    parts.push('<div>Stop #1: '+(load.stop1||'')+'</div>');
+    parts.push('<div>Destination/Return Location: '+(load.destination||'')+'</div>');
+    parts.push('<div>Pickup: '+(load.pickup||'')+'</div>');
+    parts.push('<div>Delivery: '+(load.delivery||'')+'</div>');
+    parts.push('<div>Equipment: '+(load.equipment||'')+'</div>');
+    parts.push('<hr/>');
+    parts.push('<div style="margin-top:16px;color:#999;transform:rotate(-6deg)">'+watermark+'</div>');
+    parts.push('</body>');
+    w.document.write(parts.join(''));
+    w.document.close(); w.focus(); w.print();
+  }catch{}
+}
+
+async function printInvoicePDF(inv: Invoice){
+  let jsPDF:any=null; try{ jsPDF=(await import('jspdf')).default; }catch{}
+  const sub = (inv.lines||[]).reduce((s,l)=> s+(Number(l.amount)||0),0); const tax=round2(((inv.taxPct||0)/100)*sub); const total = round2(sub + tax - (inv.discount||0));
+  if(jsPDF){ const d=new jsPDF(); d.setFontSize(16); d.text('Invoice',14,18); d.setFontSize(10);
+    d.text('Invoice ID: '+inv.id,14,26); d.text('Customer: '+(inv.customer||''),14,32); if(inv.ref) d.text('Reference: '+inv.ref,14,38);
+    let y=46; d.text('Type  Description  Note  Amount',14,y); y+=6; d.setFontSize(9);
+    (inv.lines||[]).forEach(l=>{ const row=(l.type||'')+'  '+(l.description||'')+'  '+(l.note||'')+'  $'+((l.amount||0).toFixed(2)); d.text(row.slice(0,95),14,y); y+=6; if(y>270){ d.addPage(); y=20; } });
+    y+=4; d.setFontSize(10); d.text('Tax ('+(inv.taxPct||0)+'%): $'+tax.toFixed(2),14,y); y+=6; d.text('Discount: -$'+((inv.discount||0).toFixed(2)),14,y); y+=8; d.setFontSize(12); d.text('Total: $'+total.toFixed(2),14,y);
+    d.save(inv.id+'.pdf'); return; }
+  if(!isClient()) return; try{
+    const rows=(inv.lines||[]).map(l=>'<tr><td>'+ (l.type||'') +'</td><td>'+ (l.description||'') +'</td><td>'+ (l.note||'') +'</td><td>$'+ ((l.amount||0).toFixed(2)) +'</td></tr>').join('');
+    const htmlParts:string[]=[];
+    htmlParts.push('<!doctype html><title>'+inv.id+'</title><body style="font-family:Arial">');
+    htmlParts.push('<h2>Invoice '+inv.id+'</h2>');
+    htmlParts.push('<div>Customer: '+(inv.customer||'')+'</div>');
+    htmlParts.push('<div>Ref: '+(inv.ref||'')+'</div>');
+    htmlParts.push('<table border=1 cellspacing=0 cellpadding=4 style="margin-top:8px;font-family:Arial;font-size:12px"><thead><tr><th>Type</th><th>Description</th><th>Note</th><th>Amount</th></tr></thead><tbody>'+rows+'</tbody></table>');
+    htmlParts.push('<div>Tax ('+(inv.taxPct||0)+'%): $'+tax.toFixed(2)+'</div>');
+    htmlParts.push('<div>Discount: -$'+((inv.discount||0).toFixed(2))+'</div>');
+    htmlParts.push('<h3>Total: $'+total.toFixed(2)+'</h3>');
+    htmlParts.push('</body>');
+    const w=window.open('about:blank','_blank'); if(!w) return; w.document.write(htmlParts.join('')); w.document.close(); w.focus(); w.print();
+  }catch{}
+}
+
+/*********************** Auth ************************/ 
+function useAuth(){
+  const usersLS = useLocalStorage<User[]>("dp_users", seedUsers);
+  const sessionLS = useLocalStorage<string|null>("dp_session", null);
+  const login=(u:string,p:string)=>{ const uname=(u||'').trim().toLowerCase(); const found=(usersLS.value||[]).find(x=>x.username.trim().toLowerCase()===uname); if(found && found.password===p){ sessionLS.save(found.username); return {ok:true,user:found}; } return {ok:false}; };
+  const logout=()=> sessionLS.save(null);
+  const current = (usersLS.value||[]).find(u=>u.username===sessionLS.value) || null;
+  return { users: usersLS.value||[], setUsers: usersLS.save, current, login, logout };
+}
+
+const LoginView: React.FC<{onSuccess:()=>void}> = ({onSuccess})=>{
+  const { setUsers, login } = useAuth();
+  const [u,setU]=useState(''); const [p,setP]=useState(''); const [busy,setBusy]=useState(false); const [msg,setMsg]=useState('');
+  const submit=()=>{ if(busy) return; setBusy(true); const r=login(u,p); if(r.ok){ onSuccess(); } else { setMsg('Invalid credentials'); setBusy(false);} };
+  const reset=()=> setUsers([{ username:'g.desgrosseilliers', password:'Lincoln082024', isAdmin:true }]);
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center">
+      <Card className="w-full max-w-sm"><CardBody className="space-y-4">
+        <h3 className="text-lg font-semibold">DrayagePro TMS by Hudson Insights — Login</h3>
+        <div><Label>Username</Label><Input value={u} onChange={e=>setU(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()} placeholder="username"/></div>
+        <div><Label>Password</Label><Input value={p} type="password" onChange={e=>setP(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()} placeholder="password"/></div>
+        {msg? <div className="text-red-600 text-sm">{msg}</div>: null}
+        <Btn className="w-full" onClick={submit} disabled={busy}>{busy? 'Signing in...' : 'Sign In'}</Btn>
+        <div className="flex items-center justify-between"><div className="text-xs">Demo: <code>g.desgrosseilliers / Lincoln082024</code></div><Btn variant="outline" size="sm" onClick={reset}>Reset users</Btn></div>
+      </CardBody></Card>
+    </div>
+  );
+};
+
+/*********************** Loads ************************/ 
+const Loads: React.FC = ()=>{
+  const loadsLS = useLocalStorage<Load[]>("dp_loads", seedLoads);
+  const customersLS = useLocalStorage<Customer[]>("dp_customers", seedCustomers);
+  const carriersLS = useLocalStorage<Carrier[]>("dp_carriers", seedCarriers);
+  const [q,setQ]=useState(''); const [status,setStatus]=useState('all'); const [mode,setMode]=useState('all');
+  const [editing,setEditing]=useState<Load|undefined>(undefined);
+
+  const cname=(id?:string)=> ((customersLS.value||[]).find(c=>c.id===id)||{} as any).name || '—';
+  const carname=(id?:string)=> ((carriersLS.value||[]).find(c=>c.id===id)||{} as any).name || '—';
+
+  const filtered = useMemo(()=> (loadsLS.value||[]).filter(s=> (status==='all'||s.status===status) && (mode==='all'||s.mode===mode) && [s.id,s.ref,s.origin,s.destination].some(x=> (x||'').toLowerCase().includes(q.toLowerCase())) ), [loadsLS.value,q,status,mode]);
+
+  const sum=(arr:number[])=> arr.reduce((a,b)=>a+b,0);
+  const displayTotals = (s:Load)=>{
+    if(Array.isArray(s.billables) && s.billables.length>0){
+      const c=sum(s.billables.map(b=>Number(b.customer)||0));
+      const v=sum(s.billables.map(b=>Number(b.carrier)||0));
+      return {cust: round2(c), carr: round2(v)};
+    }
+    return {cust: round2(s.customerRate||0), carr: round2(s.carrierRate||0)};
+  };
+
+  const buildInvoiceLinesFromLoad=(s:Load):InvoiceLine[]=>{
+    if(Array.isArray(s.billables) && s.billables.length>0){
+      return s.billables.map((b,idx)=>({ id:(b.id||('L'+(Math.floor(Math.random()*9000)+1000)+'-'+(idx+1))), type:b.type||'Charge', description:(b.description|| (s.ref? ('Load '+s.id+' • '+s.ref): ('Load '+s.id))), note:b.note||'Auto-created from load billables', amount: round2(Number(b.customer||0)) }));
+    }
+    return [{ id:('L'+(Math.floor(Math.random()*9000)+1000)), type:'Linehaul', description: s.ref? ('Load '+s.id+' • '+s.ref): ('Load '+s.id), note:'Auto-created from new load', amount: round2(s.customerRate||0) }];
+  };
+
+  const createCustomerInvoice=(s:Load)=>{ try{ const raw=(isClient() && localStorage.getItem('dp_invoices'))||'[]'; const list:Invoice[] = JSON.parse(raw); const lines=buildInvoiceLinesFromLoad(s); const inv:Invoice={ id:('INV-'+(Math.floor(Math.random()*900000)+100000)), ref:s.id, customer:cname(s.customerId), status:'Draft', taxPct:0, discount:0, lines, total: round2(lines.reduce((t,l)=>t+(l.amount||0),0)) }; list.unshift(inv); if(isClient()) localStorage.setItem('dp_invoices', JSON.stringify(list)); }catch{} };
+
+  const syncInvoiceForLoad=(s:Load)=>{ try{ if(!isClient()) return; const raw=localStorage.getItem('dp_invoices')||'[]'; const list:Invoice[] = JSON.parse(raw); const idx=list.findIndex(x=>x.ref===s.id); if(idx<0) return; const inv=list[idx]; if(inv.status!=='Draft') return; const lines=buildInvoiceLinesFromLoad(s); const total=round2(lines.reduce((t,l)=>t+(l.amount||0),0)); list[idx]={...inv, customer:cname(s.customerId), lines, total}; localStorage.setItem('dp_invoices', JSON.stringify(list)); }catch{} };
+
+  const upsert=(s:Load)=>{ const exists=(loadsLS.value||[]).some(x=>x.id===s.id); const next=exists? (loadsLS.value||[]).map(x=> x.id===s.id? s: x): [s, ...(loadsLS.value||[])]; loadsLS.save(next); if(!exists) createCustomerInvoice(s); else syncInvoiceForLoad(s); };
+  const remove=(id:string)=> loadsLS.save((loadsLS.value||[]).filter(x=>x.id!==id));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Loads</h3>
+        <Btn onClick={()=> setEditing({ id:('LOAD-'+(Math.floor(Math.random()*9000)+1000)), customerId:(customersLS.value||[])[0]?.id||'', mode:'Dray', trade:'Import', origin:'', stop1:'', destination:'', pickup:new Date().toISOString().slice(0,10), status:'planned', equipment:'Container', carrierRate:0, customerRate:0, billables:[] })}>+ New</Btn>
+      </div>
+      <Card><CardBody className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div><Label>Search</Label><Input value={q} onChange={e=>setQ(e.target.value)} placeholder="ID, ref, origin, destination..."/></div>
+        <div><Label>Status</Label><Input value={status} onChange={e=>setStatus(e.target.value)} placeholder="planned / tendered / ..."/></div>
+        <div><Label>Mode</Label><Input value={mode} onChange={e=>setMode(e.target.value)} placeholder="Dray / LTL / TL / Parcel"/></div>
+        <div className="self-end"><Btn variant="outline" onClick={()=>csvDownload(filtered,'loads')}>Export CSV</Btn></div>
+      </CardBody></Card>
+
+      <Card><CardBody className="p-0 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50"><tr>
+            <th className="text-left p-2">ID</th>
+            <th className="text-left p-2">Ref</th>
+            <th className="text-left p-2">Customer</th>
+            <th className="text-left p-2">Carrier</th>
+            <th className="text-left p-2">Mode</th>
+            <th className="text-left p-2">Equip</th>
+            <th className="text-left p-2">Pickup</th>
+            <th className="text-left p-2">Status</th>
+            <th className="text-right p-2">Carrier $</th>
+            <th className="text-right p-2">Customer $</th>
+            <th className="text-right p-2">Margin $</th>
+            <th className="text-right p-2">Margin %</th>
+            <th className="text-right p-2">Actions</th>
+          </tr></thead>
+          <tbody>
+            {filtered.length? (
+              filtered.map(s=> { const t=displayTotals(s); return (
+                <tr key={s.id} className="odd:bg-white even:bg-gray-50">
+                  <td className="p-2 font-medium">{s.id}</td>
+                  <td className="p-2">{s.ref||'—'}</td>
+                  <td className="p-2">{cname(s.customerId)}</td>
+                  <td className="p-2">{carname(s.carrierId)}</td>
+                  <td className="p-2">{s.mode}{(s.mode==='Dray' && s.trade) ? (' (' + s.trade + ')') : ''}</td>
+                  <td className="p-2">{s.equipment||'—'}</td>
+                  <td className="p-2">{s.pickup||'—'}</td>
+                  <td className="p-2">{(()=>{ const st=(s.status||'').toLowerCase(); const tone = st==='delivered'? 'ok' : (st==='tendered'||st==='in transit')? 'warn' : st==='cancelled'? 'bad' : 'muted'; return <Badge tone={tone as any}>{s.status}</Badge>; })()}</td>
+                  <td className="p-2 text-right">${t.carr.toFixed(2)}</td>
+                  <td className="p-2 text-right">${t.cust.toFixed(2)}</td>
+                  <td className="p-2 text-right">${margin(t.cust, t.carr).toFixed(2)}</td>
+                  <td className="p-2 text-right">{t.cust>0 ? (marginPct(t.cust,t.carr).toFixed(1)+'%'):'—'}</td>
+                  <td className="p-2 text-right">
+                    <div className="flex justify-end gap-2">
+                      <Btn variant="outline" size="sm" onClick={()=>setEditing(s)}>Edit</Btn>
+                      <Btn variant="outline" size="sm" onClick={()=>remove(s.id)}>Del</Btn>
+                      <Btn variant="outline" size="sm" onClick={()=>printBOL({...s, customer:cname(s.customerId), carrier:carname(s.carrierId)})}>BOL</Btn>
+                    </div>
+                  </td>
+                </tr>
+              );})
+            ) : (
+              <tr><td className="p-6 text-center text-gray-500" colSpan={13}>No loads.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </CardBody></Card>
+
+      <EditLoadDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert} customers={customersLS.value||[]} carriers={carriersLS.value||[]}/>
+    </div>
+  );
+};
+
+/*********************** Carriers ************************/ 
+const Carriers: React.FC = ()=>{
+  const carriersLS = useLocalStorage<Carrier[]>("dp_carriers", seedCarriers);
+  const [editing,setEditing]=useState<Carrier|undefined>(undefined); const [q,setQ]=useState('');
+  const filtered = useMemo(()=> (carriersLS.value||[]).filter(c=> (c.name||'').toLowerCase().includes(q.toLowerCase())), [carriersLS.value,q]);
+  const upsert=(c:Carrier)=>{ const ex=(carriersLS.value||[]).some(x=>x.id===c.id); carriersLS.save(ex? (carriersLS.value||[]).map(x=> x.id===c.id? c: x): [c, ...(carriersLS.value||[])]); };
+  const remove=(id:string)=> carriersLS.save((carriersLS.value||[]).filter(x=>x.id!==id));
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold">Carriers</h3>
+      <Card><CardBody className="grid grid-cols-1 md:grid-cols-3 gap-3"><div><Label>Search</Label><Input value={q} onChange={e=>setQ(e.target.value)}/></div><div className="self-end"><Btn onClick={()=> setEditing({ id:('CAR-'+(Math.floor(Math.random()*9000)+1000)), name:'', flagged:false })}>+ New</Btn></div></CardBody></Card>
+      <Card><CardBody className="p-0 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50"><tr>
+            <th className="p-2 text-left">Name</th>
+            <th className="p-2 text-left">MC#</th>
+            <th className="p-2 text-left">DOT#</th>
+            <th className="p-2 text-left">Auto Ins</th>
+            <th className="p-2 text-left">Cargo Ins</th>
+            <th className="p-2 text-left">Bond</th>
+            <th className="p-2 text-left">Flag</th>
+            <th className="p-2 text-right">Actions</th>
+          </tr></thead>
+          <tbody>
+            {filtered.length? filtered.map(c=> (
+              <tr key={c.id} className="odd:bg-white even:bg-gray-50">
+                <td className="p-2 font-medium">{c.name||'—'}</td>
+                <td className="p-2">{c.mcNumber||'—'}</td>
+                <td className="p-2">{c.dotNumber||'—'}</td>
+                <td className="p-2">{c.autoInsProvider||'—'} {c.autoPolicyNo? ('#'+c.autoPolicyNo): ''} {c.autoExp? ('('+c.autoExp+')'): ''}</td>
+                <td className="p-2">{c.cargoInsProvider||'—'} {c.cargoPolicyNo? ('#'+c.cargoPolicyNo): ''} {c.cargoExp? ('('+c.cargoExp+')'): ''}</td>
+                <td className="p-2">{c.bondDocUrl? <a href={c.bondDocUrl} target="_blank" rel="noreferrer">View</a>: '—'}</td>
+                <td className="p-2">{c.flagged? <Badge tone="bad">Flagged</Badge>: <Badge>OK</Badge>}</td>
+                <td className="p-2 text-right"><div className="flex justify-end gap-2"><Btn variant="outline" size="sm" onClick={()=>setEditing(c)}>Edit</Btn><Btn variant="outline" size="sm" onClick={()=>remove(c.id)}>Del</Btn></div></td>
+              </tr>
+            )): (
+              <tr><td className="p-6 text-center text-gray-500" colSpan={8}>No carriers.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </CardBody></Card>
+      <EditCarrierDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert}/>
+    </div>
+  );
+};
+
+/*********************** Customers ************************/ 
+const Customers: React.FC = ()=>{
+  const customersLS = useLocalStorage<Customer[]>("dp_customers", seedCustomers);
+  const [editing,setEditing]=useState<Customer|undefined>(undefined); const [q,setQ]=useState('');
+  const filtered = useMemo(()=> (customersLS.value||[]).filter(c=> (c.name||'').toLowerCase().includes(q.toLowerCase())), [customersLS.value,q]);
+  const upsert=(c:Customer)=>{ const ex=(customersLS.value||[]).some(x=>x.id===c.id); customersLS.save(ex? (customersLS.value||[]).map(x=> x.id===c.id? c: x): [c, ...(customersLS.value||[])]); };
+  const remove=(id:string)=> customersLS.save((customersLS.value||[]).filter(x=>x.id!==id));
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Customers</h3>
+        <div className="flex gap-2 items-center">
+          <Label>Search</Label>
+          <Input value={q} onChange={e=>setQ(e.target.value)} placeholder="Customer name" style={{width:240}}/>
+          <Btn onClick={()=> setEditing({ id:('CUST-'+(Math.floor(Math.random()*9000)+1000)), name:'', creditActive:true })}>+ New</Btn>
+        </div>
+      </div>
+      <Card><CardBody className="p-0 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50"><tr><th className="p-2 text-left">Name</th><th className="p-2 text-left">Credit</th><th className="p-2 text-right">Actions</th></tr></thead>
+          <tbody>
+            {filtered.length? filtered.map(c=> (
+              <tr key={c.id} className="odd:bg-white even:bg-gray-50">
+                <td className="p-2 font-medium">{c.name||'—'}</td>
+                <td className="p-2">{c.creditActive? <Badge>Active</Badge>: <Badge tone="bad">Inactive</Badge>}</td>
+                <td className="p-2 text-right">
+                  <div className="flex justify-end gap-2">
+                    <Btn variant="outline" size="sm" onClick={()=>setEditing(c)}>Edit</Btn>
+                    <Btn variant="danger" size="sm" onClick={()=>remove(c.id)}>Delete</Btn>
+                  </div>
+                </td>
+              </tr>
+            )): (
+              <tr><td className="p-6 text-center text-gray-500" colSpan={3}>No customers.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </CardBody></Card>
+      <EditCustomerDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert}/>
+    </div>
+  );
+};
+
+/*********************** Billing ************************/ 
+const Billing: React.FC = ()=>{
+  const invoicesLS = useLocalStorage<Invoice[]>("dp_invoices", seedInvoices);
+  const [editing,setEditing]=useState<Invoice|undefined>(undefined);
+  const [q,setQ]=useState('');
+  const [statusFilter,setStatusFilter]=useState<'all'|'Draft'|'Sent'|'Paid'|'Void'>('all');
+
+  const list=invoicesLS.value||[];
+  const filtered = useMemo(()=> list
+    .filter(inv=> (statusFilter==='all' || inv.status===statusFilter))
+    .filter(inv=> [inv.id, inv.customer, inv.ref].some(x=> (x||'').toLowerCase().includes(q.toLowerCase())))
+  , [list,q,statusFilter]);
+
+  const upsert=(inv:Invoice)=>{ const list=invoicesLS.value||[]; const sub=round2((inv.lines||[]).reduce((s,l)=> s+(Number(l.amount)||0),0)); const norm:Invoice={...inv, lines:(inv.lines||[]).map(l=>({...l, amount: round2(l.amount)}))}; const total=round2(sub + (((norm.taxPct||0)/100)*sub) - (norm.discount||0)); const stamp=new Date().toISOString(); if(norm.status && norm.status!=='Draft'){ norm.audit = [...(norm.audit||[]), 'Edited '+stamp]; } norm.total=total; const ex=list.some(x=>x.id===norm.id); const next=ex? list.map(x=> x.id===norm.id? norm: x): [norm, ...list]; invoicesLS.save(next); };
+  const remove=(id:string)=> invoicesLS.save(list.filter(x=>x.id!==id));
+  const setStatus = (id:string, status:Invoice['status'])=>{ const next=list.map(x=> x.id===id? {...x, status}: x); invoicesLS.save(next); };
+  const subtotal=(inv:Invoice)=> (inv.lines||[]).reduce((s,l)=> s+(Number(l.amount)||0),0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Billing</h3>
+        <div className="flex gap-2 items-center">
+          <Label className="mr-2">Status</Label>
+          <select className="h-8 border rounded-md px-2" value={statusFilter} onChange={e=> setStatusFilter(e.target.value as any)}>
+            <option value="all">All</option>
+            <option value="Draft">Draft</option>
+            <option value="Sent">Sent</option>
+            <option value="Paid">Paid</option>
+            <option value="Void">Void</option>
+          </select>
+          <Label className="ml-4 mr-2">Search</Label>
+          <Input value={q} onChange={e=>setQ(e.target.value)} placeholder="Invoice ID, Customer, Ref" style={{width:260}}/>
+        </div>
+      </div>
+
+      <Card><CardBody className="p-0 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50"><tr>
+            <th className="p-2 text-left">Invoice</th>
+            <th className="p-2 text-left">Customer</th>
+            <th className="p-2 text-left">Ref</th>
+            <th className="p-2 text-left">Status</th>
+            <th className="p-2 text-right">Subtotal</th>
+            <th className="p-2 text-right">Total</th>
+            <th className="p-2 text-right">Actions</th>
+          </tr></thead>
+          <tbody>
+            {filtered.length? filtered.map(inv=>{
+              const sub=subtotal(inv); const tax=round2(((inv.taxPct||0)/100)*sub); const tot=round2(sub+tax-(inv.discount||0));
+              const isVoid=inv.status==='Void'; const tone = inv.status==='Paid' ? 'ok' : inv.status==='Sent' ? 'warn' : inv.status==='Void' ? 'bad' : 'muted';
+              return (
+                <tr key={inv.id} className="odd:bg-white even:bg-gray-50">
+                  <td className="p-2 font-medium">{inv.id}</td>
+                  <td className="p-2">{inv.customer||'—'}</td>
+                  <td className="p-2">{inv.ref||'—'}</td>
+                  <td className="p-2">
+                    <div className="flex items-center gap-2">
+                      <Badge tone={tone as any}>{inv.status}</Badge>
+                      <select className="h-8 border rounded-md px-2" value={inv.status} onChange={e=> setStatus(inv.id, e.target.value as Invoice['status'])}>
+                        <option value="Draft">Draft</option>
+                        <option value="Sent">Sent</option>
+                        <option value="Paid">Paid</option>
+                        <option value="Void">Void</option>
+                      </select>
+                    </div>
+                  </td>
+                  <td className="p-2 text-right">${sub.toFixed(2)}</td>
+                  <td className="p-2 text-right">${tot.toFixed(2)}</td>
+                  <td className="p-2 text-right">
+                    <div className="flex justify-end gap-2">
+                      <Btn variant="outline" size="sm" onClick={()=>!isVoid && setEditing(inv)} disabled={isVoid} title={isVoid? 'Cannot edit a Void invoice':''}>Edit</Btn>
+                      <Btn variant="outline" size="sm" onClick={()=>!isVoid && printInvoicePDF(inv)} disabled={isVoid} title={isVoid? 'Cannot export PDF for Void invoice':''}>PDF</Btn>
+                      <Btn variant="danger" size="sm" onClick={()=>remove(inv.id)}>Del</Btn>
+                    </div>
+                  </td>
+                </tr>
+              );
+            }) : (
+              <tr><td className="p-6 text-center text-gray-500" colSpan={7}>No invoices.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </CardBody></Card>
+
+      <InvoiceEditor value={editing} onClose={()=>setEditing(undefined)} onSave={upsert}/>
+    </div>
+  );
+};
+
+/*********************** Editors ************************/ 
+const EditCustomerDialog: React.FC<{value?:Customer,onClose:()=>void,onSave:(c:Customer)=>void}> = ({value,onClose,onSave})=>{
+  const [form,setForm]=useState<Customer|undefined>(value);
+  useEffect(()=>{ setForm(value); },[value]);
+  if(!value) return null; const u=(k:keyof Customer,v:any)=> setForm(f=> ({...(f as Customer), [k]: v}));
+  const commit=()=>{ if(!form) return; onSave(form); onClose(); };
+  return (
+    <Modal open={!!value} onClose={onClose} title="Edit Customer" width={520}>
+      <div className="space-y-3">
+        <div><Label>Name</Label><Input value={form?.name||''} onChange={e=>u('name', e.target.value)}/></div>
+        <div className="flex items-center gap-2"><Label>Credit Active</Label><Btn variant="outline" onClick={()=>u('creditActive', !form?.creditActive)}>{form?.creditActive? 'Set Inactive':'Set Active'}</Btn></div>
+        <div className="flex justify-end gap-2"><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={commit}>Save</Btn></div>
+      </div>
+    </Modal>
+  );
+};
+
+const EditCarrierDialog: React.FC<{value?:Carrier,onClose:()=>void,onSave:(c:Carrier)=>void}> = ({value,onClose,onSave})=>{
+  const [form,setForm]=useState<Carrier|undefined>(value);
+  useEffect(()=>{ setForm(value); },[value]);
+  if(!value) return null; const u=(k:keyof Carrier,v:any)=> setForm(f=> ({...(f as Carrier), [k]: v}));
+  const commit=()=>{ if(!form) return; onSave(form); onClose(); };
+  return (
+    <Modal open={!!value} onClose={onClose} title="Edit Carrier" width={720}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div><Label>Name</Label><Input value={form?.name||''} onChange={e=>u('name', e.target.value)}/></div>
+        <div><Label>MC#</Label><Input value={form?.mcNumber||''} onChange={e=>u('mcNumber', e.target.value)}/></div>
+        <div><Label>DOT#</Label><Input value={form?.dotNumber||''} onChange={e=>u('dotNumber', e.target.value)}/></div>
+        <div><Label>Bond (URL)</Label><Input value={form?.bondDocUrl||''} onChange={e=>u('bondDocUrl', e.target.value)} placeholder="https://..."/></div>
+        <div><Label>Auto Insurance Provider</Label><Input value={form?.autoInsProvider||''} onChange={e=>u('autoInsProvider', e.target.value)}/></div>
+        <div><Label>Auto Policy #</Label><Input value={form?.autoPolicyNo||''} onChange={e=>u('autoPolicyNo', e.target.value)}/></div>
+        <div><Label>Auto Policy Expiration</Label><Input type="date" value={form?.autoExp||''} onChange={e=>u('autoExp', e.target.value)}/></div>
+        <div><Label>Cargo Insurance Provider</Label><Input value={form?.cargoInsProvider||''} onChange={e=>u('cargoInsProvider', e.target.value)}/></div>
+        <div><Label>Cargo Policy #</Label><Input value={form?.cargoPolicyNo||''} onChange={e=>u('cargoPolicyNo', e.target.value)}/></div>
+        <div><Label>Cargo Policy Expiration</Label><Input type="date" value={form?.cargoExp||''} onChange={e=>u('cargoExp', e.target.value)}/></div>
+        <div className="flex items-center gap-2"><Label>Compliance</Label><Btn variant="outline" onClick={()=>u('flagged', !form?.flagged)}>{form?.flagged? 'Unflag':'Flag'}</Btn></div>
+        <div className="md:col-span-2 flex justify-end gap-2"><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={commit}>Save</Btn></div>
+      </div>
+    </Modal>
+  );
+};
+
+const BillableRow: React.FC<{row:Billable,onChange:(r:Billable)=>void,onRemove:()=>void}> = ({row,onChange,onRemove})=> (
+  <tr>
+    <td className="p-1">
+      <select className="h-8 border rounded-md px-2" value={row.type} onChange={e=>onChange({...row,type:e.target.value})}>
+        {BILLABLE_TYPES.map(t=> <option key={t} value={t}>{t}</option>)}
+      </select>
+    </td>
+    <td className="p-1"><Input value={row.description||''} onChange={e=>onChange({...row,description:e.target.value})} placeholder="Description"/></td>
+    <td className="p-1"><TextArea className="min-h-[36px]" value={row.note||''} onChange={e=>onChange({...row,note:e.target.value})} placeholder="Note"/></td>
+    <td className="p-1"><NumberInput type="number" step="0.01" value={moneyStr(row.carrier ?? 0)} onChange={e=>onChange({...row,carrier:parseMoney((e.target as HTMLInputElement).value)})} onBlur={snapMoneyBlur} placeholder="0.00"/></td>
+    <td className="p-1"><NumberInput type="number" step="0.01" value={moneyStr(row.customer ?? 0)} onChange={e=>onChange({...row,customer:parseMoney((e.target as HTMLInputElement).value)})} onBlur={snapMoneyBlur} placeholder="0.00"/></td>
+    <td className="p-1 text-right"><Btn variant="outline" size="sm" onClick={onRemove}>Del</Btn></td>
+  </tr>
+);
+
+const EditLoadDialog: React.FC<{value?:Load,onClose:()=>void,onSave:(s:Load)=>void, customers:Customer[], carriers:Carrier[]}> = ({value,onClose,onSave,customers,carriers})=>{
+  const [form,setForm]=useState<Load|undefined>(value);
+  useEffect(()=>{ setForm(value); },[value]);
+  if(!value) return null;
+  const u=(k:keyof Load,v:any)=> setForm(f=> ({...(f as Load), [k]: v}));
+  const setBill=(i:number, b:Billable)=> u('billables', (form?.billables||[]).map((x,idx)=> idx===i? b: x));
+  const addBill=(t:string)=> u('billables', [...(form?.billables||[]), { id:('B'+(Math.floor(Math.random()*900000)+100000)), type:t||'Linehaul', description:t||'Linehaul', customer:0, carrier:0 }]);
+  const delBill=(i:number)=> u('billables', (form?.billables||[]).filter((_,idx)=> idx!==i));
+
+  const custTotal = round2((form?.billables||[]).reduce((s,l)=> s+(Number(l.customer)||0),0));
+  const carrTotal = round2((form?.billables||[]).reduce((s,l)=> s+(Number(l.carrier)||0),0));
+
+  const commit=()=>{ if(!form) return; const clean:Load={...form, customerRate: custTotal || form.customerRate||0, carrierRate: carrTotal || form.carrierRate||0, billables:(form.billables||[]).map(b=>({...b, customer:round2(b.customer||0), carrier:round2(b.carrier||0)})) }; onSave(clean); onClose(); };
+
+  return (
+    <Modal open={!!value} onClose={onClose} title={'Edit Load '+(form?.id||'')} width={1000}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div><Label>Customer</Label>
+            <select className="h-9 border rounded-md px-2 w-full" value={form?.customerId||''} onChange={e=>u('customerId', e.target.value)}>
+              {(customers||[]).map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div><Label>Carrier</Label>
+            <select className="h-9 border rounded-md px-2 w-full" value={form?.carrierId||''} onChange={e=>u('carrierId', e.target.value)}>
+              <option value="">—</option>
+              {(carriers||[]).map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div><Label>Mode</Label>
+            <select className="h-9 border rounded-md px-2 w-full" value={form?.mode||'Dray'} onChange={e=>u('mode', e.target.value)}>
+              <option>Dray</option><option>TL</option><option>LTL</option><option>Parcel</option>
+            </select>
+          </div>
+          {form?.mode==='Dray' && (
+            <div><Label>Trade</Label>
+              <select className="h-9 border rounded-md px-2 w-full" value={form?.trade||'Import'} onChange={e=>u('trade', e.target.value as any)}>
+                <option>Import</option><option>Export</option>
+              </select>
+            </div>
+          )}
+          <div><Label>Origin</Label><Input value={form?.origin||''} onChange={e=>u('origin', e.target.value)} placeholder="City/Port/Terminal"/></div>
+          <div><Label>Stop #1</Label><Input value={form?.stop1||''} onChange={e=>u('stop1', e.target.value)} placeholder="Intermediate stop"/></div>
+          <div><Label>Destination/Return Location</Label><Input value={form?.destination||''} onChange={e=>u('destination', e.target.value)} placeholder="Final or return"/></div>
+          <div><Label>Pickup</Label><Input type="date" value={form?.pickup||''} onChange={e=>u('pickup', e.target.value)}/></div>
+          <div><Label>Delivery</Label><Input type="date" value={form?.delivery||''} onChange={e=>u('delivery', e.target.value)}/></div>
+          <div><Label>Equipment</Label><Input value={form?.equipment||''} onChange={e=>u('equipment', e.target.value)}/></div>
+          <div><Label>Container #</Label><Input value={form?.containerNo||''} onChange={e=>u('containerNo', e.target.value)}/></div>
+          <div><Label>Trailer #</Label><Input value={form?.trailerNo||''} onChange={e=>u('trailerNo', e.target.value)}/></div>
+        </div>
+
+        <div className="mt-2">
+          <div className="flex items-center justify-between mb-1">
+            <h4 className="font-semibold">Billables</h4>
+            <div className="flex gap-2 items-center">
+              <select id="qa" className="h-8 border rounded-md px-2" defaultValue="Linehaul" onChange={e=>{ const v=e.target.value; if(v){ addBill(v); e.target.value='Linehaul'; }}}>
+                {BILLABLE_TYPES.map(t=> <option key={t} value={t}>{t}</option>)}
+              </select>
+              <Btn variant="outline" size="sm" onClick={()=>addBill('Linehaul')}>+ Add</Btn>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50"><tr>
+                <th className="p-2 text-left">Type</th>
+                <th className="p-2 text-left">Description</th>
+                <th className="p-2 text-left">Note</th>
+                <th className="p-2 text-right">Carrier $</th>
+                <th className="p-2 text-right">Customer $</th>
+                <th className="p-2 text-right">Actions</th>
+              </tr></thead>
+              <tbody>
+                {(form?.billables||[]).map((b,idx)=> <BillableRow key={b.id} row={b} onChange={r=>setBill(idx,r)} onRemove={()=>delBill(idx)}/>)
+              }</tbody>
+              <tfoot>
+                <tr>
+                  <td className="p-2 font-medium" colSpan={3}>Totals</td>
+                  <td className="p-2 text-right">${carrTotal.toFixed(2)}</td>
+                  <td className="p-2 text-right">${custTotal.toFixed(2)}</td>
+                  <td className="p-2 text-right text-gray-600">Margin ${margin(custTotal,carrTotal).toFixed(2)} ({custTotal>0? marginPct(custTotal,carrTotal).toFixed(1):'0.0'}%)</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={commit}>Save</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const InvoiceEditor: React.FC<{value?:Invoice,onClose:()=>void,onSave:(i:Invoice)=>void}> = ({value,onClose,onSave})=>{
+  const [form,setForm]=useState<Invoice|undefined>(value);
+  useEffect(()=>{ setForm(value); },[value]);
+  if(!value) return null;
+  const u=(k:keyof Invoice,v:any)=> setForm(f=> ({...(f as Invoice), [k]: v}));
+  const setLine = (i:number, l:InvoiceLine)=> u('lines', (form?.lines||[]).map((x,idx)=> idx===i? l: x));
+  const addLine = (t:string)=> u('lines', [...(form?.lines||[]), { id:('L'+(Math.floor(Math.random()*900000)+100000)), type:t||'Linehaul', description:t||'Linehaul', note:'', amount:0 }]);
+  const delLine = (i:number)=> u('lines', (form?.lines||[]).filter((_,idx)=> idx!==i));
+  const sub=round2((form?.lines||[]).reduce((s,l)=> s+(Number(l.amount)||0),0));
+  const tax=round2(((form?.taxPct||0)/100)*sub);
+  const total=round2(sub + tax - (form?.discount||0));
+  const commit=()=>{ if(!form) return; const clean:Invoice={...form, lines:(form.lines||[]).map(x=>({...x, amount:round2(x.amount)})), total:round2(sub + tax - (form?.discount||0)) }; onSave(clean); onClose(); };
+  const isVoid=form?.status==='Void';
+
+  return (
+    <Modal open={!!value} onClose={onClose} title={'Edit Invoice '+(form?.id||'')} width={900}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div><Label>Customer</Label><Input value={form?.customer||''} onChange={e=>u('customer', e.target.value)} /></div>
+          <div><Label>Ref</Label><Input value={form?.ref||''} onChange={e=>u('ref', e.target.value)} /></div>
+          <div><Label>Status</Label>
+            <select className="h-9 border rounded-md px-2 w-full" value={form?.status||'Draft'} onChange={e=>u('status', e.target.value)}>
+              <option>Draft</option><option>Sent</option><option>Paid</option><option>Void</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mt-2">
+          <h4 className="font-semibold">Lines</h4>
+          <div className="flex gap-2 items-center">
+            <select className="h-8 border rounded-md px-2" defaultValue="Linehaul" onChange={e=>{ const v=e.target.value; if(v){ addLine(v); e.target.value='Linehaul'; }}}>
+              {BILLABLE_TYPES.map(t=> <option key={t} value={t}>{t}</option>)}
+            </select>
+            <Btn variant="outline" size="sm" onClick={()=>addLine('Linehaul')} disabled={isVoid}>+ Add</Btn>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50"><tr>
+              <th className="p-2 text-left">Type</th>
+              <th className="p-2 text-left">Description</th>
+              <th className="p-2 text-left">Note</th>
+              <th className="p-2 text-right">Amount</th>
+              <th className="p-2 text-right">Actions</th>
+            </tr></thead>
+            <tbody>
+              {(form?.lines||[]).map((l,idx)=> (
+                <tr key={l.id}>
+                  <td className="p-1">
+                    <select className="h-8 border rounded-md px-2" value={l.type} onChange={e=>setLine(idx,{...l,type:e.target.value})}>
+                      {BILLABLE_TYPES.map(t=> <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </td>
+                  <td className="p-1"><Input value={l.description||''} onChange={e=>setLine(idx,{...l,description:e.target.value})}/></td>
+                  <td className="p-1"><TextArea className="min-h-[36px]" value={l.note||''} onChange={e=>setLine(idx,{...l,note:e.target.value})}/></td>
+                  <td className="p-1"><NumberInput type="number" step="0.01" value={moneyStr(l.amount)} onChange={e=>setLine(idx,{...l,amount:parseMoney((e.target as HTMLInputElement).value)})} onBlur={snapMoneyBlur}/></td>
+                  <td className="p-1 text-right"><Btn variant="outline" size="sm" onClick={()=>delLine(idx)} disabled={isVoid}>Del</Btn></td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr><td className="p-2 font-medium" colSpan={3}>Subtotal</td><td className="p-2 text-right" colSpan={2}>${sub.toFixed(2)}</td></tr>
+              <tr><td className="p-2" colSpan={3}>Tax %</td><td className="p-2 text-right" colSpan={2}><NumberInput type="number" step="0.01" value={moneyStr(form?.taxPct||0)} onChange={e=>u('taxPct', parseMoney((e.target as HTMLInputElement).value))} onBlur={snapMoneyBlur}/></td></tr>
+              <tr><td className="p-2" colSpan={3}>Discount</td><td className="p-2 text-right" colSpan={2}><NumberInput type="number" step="0.01" value={moneyStr(form?.discount||0)} onChange={e=>u('discount', parseMoney((e.target as HTMLInputElement).value))} onBlur={snapMoneyBlur}/></td></tr>
+              <tr><td className="p-2 font-semibold" colSpan={3}>Total</td><td className="p-2 text-right font-semibold" colSpan={2}>${total.toFixed(2)}</td></tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={commit} disabled={isVoid} title={isVoid? 'Cannot save a Void invoice':''}>Save</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+/*********************** App Shell ************************/ 
+function AppShell(){
+  const { current, logout } = useAuth();
+  const [tab,setTab]=useState<'loads'|'carriers'|'customers'|'billing'>('loads');
+  if(!current) return <LoginView onSuccess={()=>setTab('loads')} />;
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold">DrayagePro TMS by Hudson Insights</h2>
+        <div className="flex gap-2">
+          <Btn variant={tab==='loads'? 'primary':'outline'} onClick={()=>setTab('loads')}>Loads</Btn>
+          <Btn variant={tab==='carriers'? 'primary':'outline'} onClick={()=>setTab('carriers')}>Carriers</Btn>
+          <Btn variant={tab==='customers'? 'primary':'outline'} onClick={()=>setTab('customers')}>Customers</Btn>
+          <Btn variant={tab==='billing'? 'primary':'outline'} onClick={()=>setTab('billing')}>Billing</Btn>
+          <Btn variant="ghost" onClick={logout}>Logout</Btn>
+        </div>
+      </div>
+      {tab==='loads' && <Loads/>}
+      {tab==='carriers' && <Carriers/>}
+      {tab==='customers' && <Customers/>}
+      {tab==='billing' && <Billing/>}
+    </div>
+  );
+}
+
+export default function App(){
+  /* Sanity tests (non-throwing) */
+  try{
+    console.assert(moneyStr(1.235)==='1.24','moneyStr 2dp');
+    console.assert(moneyStr(12)==='12.00','moneyStr pad');
+    console.assert(marginPct(100,60)===40,'margin%');
+    console.assert(parseMoney('$1,234.56')===1234.56,'parseMoney $ with commas');
+    console.assert(parseMoney(' -12.3 ')===-12.3,'parseMoney negative');
+    console.assert(moneyStr(0)==='0.00','money zero');
+  }catch{}
+  return <AppShell/>;
+}
