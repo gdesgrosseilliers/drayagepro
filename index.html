@@ -1,23 +1,498 @@
-# Emoji GitHub Test 🧪✨
+import React, { useEffect, useMemo, useState } from "react";
 
-This repo exists to check how GitHub renders and preserves emoji across:
-- Markdown ✅
-- Web preview ✅
-- Raw file view ✅
-- Git logs / diffs ✅
-- GitHub Actions logs ✅
+/** ================== Minimal UI primitives (no external deps) ================== */
+const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & {variant?:"primary"|"outline"|"danger"|"ghost", size?:"sm"|"md"|"icon"}> = ({variant="primary",size="md",className="",children,...rest})=>(
+  <button {...rest} className={[
+    "inline-flex items-center justify-center select-none border rounded-md transition-colors",
+    variant==="primary"&&"bg-blue-600 text-white border-blue-700 hover:bg-blue-700",
+    variant==="outline"&&"bg-white text-gray-900 border-gray-300 hover:bg-gray-50",
+    variant==="danger"&&"bg-red-600 text-white border-red-700 hover:bg-red-700",
+    variant==="ghost"&&"bg-transparent text-gray-900 border-transparent hover:bg-gray-50",
+    size==="sm"?"h-8 px-2 text-sm":size==="icon"?"h-8 w-8 p-0":"h-9 px-3",
+    className
+  ].filter(Boolean).join(" ")}>{children}</button>
+);
+const Input:React.FC<React.InputHTMLAttributes<HTMLInputElement>>=(p)=><input {...p} className={["h-9 px-3 border rounded-md w-full",p.className||""].join(" ")}/>;
+const NumberInput:React.FC<React.InputHTMLAttributes<HTMLInputElement>>=(p)=><input {...p} inputMode="decimal" className={["h-9 px-3 border rounded-md w-full text-right focus:ring-2 focus:ring-blue-500",p.className||""].join(" ")}/>;
+const TextArea:React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>>=(p)=><textarea {...p} className={["min-h-[72px] px-3 py-2 border rounded-md w-full",p.className||""].join(" ")}/>;
+const Label:React.FC<React.HTMLAttributes<HTMLLabelElement>>=({className="",...rest})=><label {...rest} className={["block text-sm font-medium text-gray-700",className].join(" ")}/>;
+const Card:React.FC<React.HTMLAttributes<HTMLDivElement>>=({className="",...rest})=><div {...rest} className={["border rounded-lg bg-white",className].join(" ")}/>;
+const CardBody:React.FC<React.HTMLAttributes<HTMLDivElement>>=({className="",...rest})=><div {...rest} className={["p-4",className].join(" ")}/>;
+const Badge:React.FC<{tone?:"ok"|"warn"|"danger"|"muted"|"bad"}>=({tone="muted",children})=>{
+  const map={ok:"bg-green-100 text-green-800",warn:"bg-yellow-100 text-yellow-800",danger:"bg-red-100 text-red-800",muted:"bg-gray-100 text-gray-700",bad:"bg-red-100 text-red-800"} as const;
+  return <span className={["text-xs px-2 py-0.5 rounded",map[tone]].join(" ")}>{children}</span>
+}
+const Modal:React.FC<{open:boolean;onClose:()=>void;title?:React.ReactNode;width?:number;children:React.ReactNode}>=({open,onClose,title,children,width=820})=>{
+  if(!open) return null;
+  return(<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="absolute inset-0 bg-black/30" onClick={onClose}/>
+    <Card className="relative w-full" style={{maxWidth:width}}>
+      <CardBody>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="font-semibold">{title||""}</h4>
+          <Btn variant="outline" onClick={onClose}>Close</Btn>
+        </div>
+        {children}
+      </CardBody>
+    </Card>
+  </div>)
+};
 
-## Samples
+/** ================== Utils & Types ================== */
+const isClient=()=> typeof window!=="undefined" && !!window.localStorage;
+const round2=(n:any)=> Math.round((Number(n)||0)*100)/100;
+// robust money parse (no regex literals)
+const parseMoney=(s:any)=>{
+  const t=String(s??""); const noCommas=t.split(",").join("");
+  const quick=Number(noCommas); if(!Number.isNaN(quick)&&Number.isFinite(quick)) return round2(quick);
+  let out="", seenDot=false;
+  for(let i=0;i<noCommas.length;i++){ const ch=noCommas[i];
+    if((ch>="0"&&ch<="9") || (ch==="-"&&out==="") || (ch==="."&&!seenDot)){ out+=ch; if(ch===".") seenDot=true; }
+  }
+  const num=parseFloat(out||"0"); return round2(Number.isFinite(num)?num:0);
+};
+const moneyStr=(n:any)=> round2(n||0).toFixed(2);
+const snapMoneyBlur=(e:React.FocusEvent<HTMLInputElement>)=>{ try{ const el=e.target as HTMLInputElement; el.value=moneyStr(parseMoney(el.value)); }catch{} };
+const margin=(cust:number,carr:number)=> round2((cust||0)-(carr||0));
+const marginPct=(cust:number,carr:number)=>{ const c=Number(cust)||0; if(c<=0) return 0; return round2(((c-(Number(carr)||0))/c)*100); };
+const BILLABLE_TYPES=["Linehaul","Fuel","Detention","Accessorial","Lumper","Chassis","Stopoff","Storage","Waiting","Other"];
 
-- Faces: 😀 😎 🤓 🥳 🫠 🥲
-- People (skin tones): 👍 👍🏻 👍🏽 👍🏿 ✌🏾 🙌🏽
-- ZWJ sequences: 👨‍👩‍👧‍👦  🧑‍💻  🏳️‍🌈  🏳️‍⚧️
-- Flags: 🇺🇸 🇨🇦 🇲🇽 🇪🇺 🇯🇵
-- Symbols: ©️ ®️ ™️ ✨ 🔥 💡
-- Food: 🌮 🍣 🍩 🥑
-- Transport: 🚚 🚛 🚂 ✈️ 🚢
-- Time: ⏱️ ⏲️ ⏰ 🕰️
-- Misc: 🧵 🧱 🧭 🧰
+export type Customer={ id:string; name:string; creditActive?:boolean };
+export type Carrier={ id:string; name:string; mcNumber?:string; dotNumber?:string; bondDocUrl?:string; autoInsProvider?:string; autoPolicyNo?:string; autoExp?:string; cargoInsProvider?:string; cargoPolicyNo?:string; cargoExp?:string; flagged?:boolean };
+export type Billable={ id:string; type:string; description?:string; note?:string; carrier?:number; customer?:number };
+export type Load={ id:string; ref?:string; customerId:string; carrierId?:string; mode:string; trade?:"Import"|"Export"; origin?:string; stop1?:string; destination?:string; pickup?:string; delivery?:string; status:string; equipment?:string; containerNo?:string; trailerNo?:string; billables:Billable[] };
+export type InvoiceLine={ id:string; type:string; description?:string; note?:string; amount:number };
+export type Invoice={ id:string; ref?:string; customer:string; status:"Draft"|"Sent"|"Paid"|"Void"; lines:InvoiceLine[]; taxPct:number; discount:number; total:number };
+export type User={ username:string; password:string; isAdmin?:boolean };
 
-**Tip:** Make a commit with an emoji in the message, e.g.  
-`git commit -m "Add emoji tests 🚀"`
+/** ================== Seeds ================== */
+const seedCustomers:Customer[]=[{id:"CUST-1001",name:"Hudson Insights",creditActive:true}];
+const seedCarriers:Carrier[]=[{id:"CAR-2001",name:"Windy City Drayage",mcNumber:"123456",dotNumber:"7654321"}];
+const seedLoads:Load[]=[{id:"LOAD-3001",ref:"PO-7781",customerId:"CUST-1001",carrierId:"CAR-2001",mode:"Dray",trade:"Import",origin:"CN-LBT Pier E",stop1:"UP Global 1",destination:"CIC Chicago",pickup:"2025-10-18",delivery:"2025-10-20",status:"planned",equipment:"Container",containerNo:"MSCU1234567",trailerNo:"CH-0091",billables:[{id:"B1",type:"Linehaul",description:"Linehaul",note:"",carrier:550,customer:775},{id:"B2",type:"Fuel",description:"Fuel",note:"Auto",carrier:50,customer:75}]}];
+const seedInvoices:Invoice[]=[{id:"INV-9001",ref:"LOAD-3001",customer:"Hudson Insights",status:"Draft",taxPct:0,discount:0,total:850,lines:[{id:"L1",type:"Linehaul",description:"Load charge",note:"Auto-created",amount:775},{id:"L2",type:"Fuel",description:"Surcharge",note:"Auto-created",amount:75}]}];
+const seedUsers:User[]=[{username:"g.desgrosseilliers",password:"Lincoln082024",isAdmin:true}];
+
+/** ================== localStorage hook ================== */
+function useLocalStorage<T>(key:string, seed:T){
+  const [value,setValue]=useState<T>(()=>{ if(!isClient()) return seed; try{ const raw=window.localStorage.getItem(key); return raw? JSON.parse(raw): seed; }catch{ return seed; } });
+  useEffect(()=>{ if(!isClient()) return; try{ window.localStorage.setItem(key, JSON.stringify(value)); }catch{} },[key,value]);
+  const save=(next:T)=>{ setValue(next); if(!isClient()) return; try{ window.localStorage.setItem(key, JSON.stringify(next)); }catch{} };
+  return { value, save };
+}
+
+/** ================== CSV & PDF (HTML-print) helpers ================== */
+const createCSV=(rows:any[])=>{ if(!rows?.length) return ""; const headers=Object.keys(rows[0]); const esc=(v:any)=> '"'+String(v??"").split('"').join('""')+'"'; return [headers.join(","),...rows.map(r=>headers.map(k=>esc((r as any)[k])).join(","))].join("\n"); };
+const csvDownload=(rows:any[], name:string)=>{ const csv=createCSV(rows); if(!csv) return; const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8;"})); const a=document.createElement("a"); a.href=url; a.download=name+".csv"; a.click(); URL.revokeObjectURL(url); };
+
+function openPrintHTML(title:string, bodyParts:string[]){
+  if(!isClient()) return; try{ const w=window.open("about:blank","_blank"); if(!w) return; const out:string[]=[]; out.push("<!doctype html><title>"+title+"</title><body style='font-family:Arial'>"); out.push(...bodyParts); out.push("</body>"); w.document.write(out.join("")); w.document.close(); w.focus(); w.print(); }catch{}
+}
+function printBOL(load:Partial<Load>&{customer?:string;carrier?:string}){
+  const parts:string[]=[]; parts.push("<h2>Bill of Lading</h2>"); parts.push("<div>Load: "+(load.id||"")+"</div>"); if(load.ref) parts.push("<div>Ref: "+load.ref+"</div>"); parts.push("<div>Customer: "+(load.customer||"")+"</div>"); parts.push("<div>Carrier: "+(load.carrier||"")+"</div>");
+  parts.push("<div>Origin: "+(load.origin||"")+"</div>"); parts.push("<div>Stop #1: "+(load.stop1||"")+"</div>"); parts.push("<div>Destination/Return Location: "+(load.destination||"")+"</div>");
+  parts.push("<div>Pickup: "+(load.pickup||"")+"</div>"); if(load.delivery) parts.push("<div>Delivery: "+load.delivery+"</div>");
+  parts.push("<div>Equipment: "+(load.equipment||"")+"</div>"); if(load.containerNo) parts.push("<div>Container #: "+load.containerNo+"</div>"); if(load.trailerNo) parts.push("<div>Trailer #: "+load.trailerNo+"</div>");
+  parts.push("<hr/><div style='margin-top:16px;color:#999;transform:rotate(-6deg)'>Created in DrayagePro TMS by Hudson Insights</div>");
+  openPrintHTML(String(load.id||"BOL"), parts);
+}
+function printInvoicePDF(inv:Invoice){
+  const sub=(inv.lines||[]).reduce((s,l)=>s+(Number(l.amount)||0),0); const tax=round2(((inv.taxPct||0)/100)*sub); const total=round2(sub + tax - (inv.discount||0));
+  const rows=(inv.lines||[]).map(l=>"<tr><td>"+(l.type||"")+"</td><td>"+(l.description||"")+"</td><td>"+(l.note||"")+"</td><td>$"+((l.amount||0).toFixed(2))+"</td></tr>").join("");
+  const parts:string[]=[]; parts.push("<h2>Invoice "+inv.id+"</h2>"); parts.push("<div>Customer: "+(inv.customer||"")+"</div>"); if(inv.ref) parts.push("<div>Ref: "+inv.ref+"</div>");
+  parts.push("<table border=1 cellspacing=0 cellpadding=4 style='margin-top:8px;font-family:Arial;font-size:12px'><thead><tr><th>Type</th><th>Description</th><th>Note</th><th>Amount</th></tr></thead><tbody>"+rows+"</tbody></table>");
+  parts.push("<div>Tax ("+(inv.taxPct||0)+"%): $"+tax.toFixed(2)+"</div>"); parts.push("<div>Discount: -$"+((inv.discount||0).toFixed(2))+"</div>"); parts.push("<h3>Total: $"+total.toFixed(2)+"</h3>");
+  openPrintHTML(inv.id, parts);
+}
+
+/** ================== Auth ================== */
+function useAuth(){
+  const usersLS=useLocalStorage<User[]>("dp_users", seedUsers);
+  const sessionLS=useLocalStorage<string|null>("dp_session", null);
+  const login=(u:string,p:string)=>{ const uname=(u||"").trim().toLowerCase(); const found=(usersLS.value||[]).find(x=>x.username.trim().toLowerCase()===uname); if(found && found.password===p){ sessionLS.save(found.username); return {ok:true,user:found}; } return {ok:false}; };
+  const logout=()=> sessionLS.save(null);
+  const current=(usersLS.value||[]).find(u=>u.username===sessionLS.value) || null;
+  return { users:usersLS.value||[], setUsers:usersLS.save, current, login, logout };
+}
+const LoginView:React.FC<{onSuccess:()=>void}>=({onSuccess})=>{
+  const { setUsers, login }=useAuth(); const [u,setU]=useState(""); const [p,setP]=useState(""); const [busy,setBusy]=useState(false); const [msg,setMsg]=useState("");
+  const submit=()=>{ if(busy) return; setBusy(true); const r=login(u,p); if(r.ok){ onSuccess(); } else { setMsg("Invalid credentials"); setBusy(false);} };
+  const reset=()=> setUsers([{username:"g.desgrosseilliers",password:"Lincoln082024",isAdmin:true}]);
+  return(<div className="min-h-[60vh] flex items-center justify-center">
+    <Card className="w-full max-w-sm"><CardBody className="space-y-4">
+      <h3 className="text-lg font-semibold">DrayagePro TMS by Hudson Insights — Login</h3>
+      <div><Label>Username</Label><Input value={u} onChange={e=>setU(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="username"/></div>
+      <div><Label>Password</Label><Input type="password" value={p} onChange={e=>setP(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="password"/></div>
+      {msg? <div className="text-red-600 text-sm">{msg}</div>:null}
+      <Btn className="w-full" onClick={submit} disabled={busy}>{busy?"Signing in...":"Sign In"}</Btn>
+      <div className="flex items-center justify-between"><div className="text-xs">Demo: <code>g.desgrosseilliers / Lincoln082024</code></div><Btn variant="outline" size="sm" onClick={reset}>Reset users</Btn></div>
+    </CardBody></Card>
+  </div>)
+}
+
+/** ================== Pages: Loads ================== */
+type Ctx = { customers:Customer[]; carriers:Carrier[] };
+const Loads:React.FC<{ctx:Ctx}>=({ctx})=>{
+  const loadsLS=useLocalStorage<Load[]>("dp_loads", seedLoads);
+  const invoicesLS=useLocalStorage<Invoice[]>("dp_invoices", seedInvoices);
+  const [q,setQ]=useState(""); const [status,setStatus]=useState("all"); const [mode,setMode]=useState("all"); const [editing,setEditing]=useState<Load|undefined>();
+
+  const cname=(id?:string)=> (ctx.customers.find(c=>c.id===id)||{} as any).name||"—";
+  const carname=(id?:string)=> (ctx.carriers.find(c=>c.id===id)||{} as any).name||"—";
+
+  const filtered=useMemo(()=> (loadsLS.value||[]).filter(s=>(status==="all"||s.status===status)&&(mode==="all"||s.mode===mode)&&[s.id,s.ref,s.origin,s.destination].some(x=>(x||"").toLowerCase().includes(q.toLowerCase())) ), [loadsLS.value,q,status,mode]);
+
+  const sum=(xs:number[])=> xs.reduce((a,b)=>a+b,0);
+  const totals=(s:Load)=>{ const cust=sum(s.billables.map(b=>Number(b.customer)||0)); const carr=sum(s.billables.map(b=>Number(b.carrier)||0)); return {cust:round2(cust), carr:round2(carr)}; };
+
+  const buildInvoiceLinesFromLoad=(s:Load):InvoiceLine[]=> s.billables.length? s.billables.map((b,idx)=>({
+      id:b.id||("L"+(Math.floor(Math.random()*9000)+1000)+"-"+(idx+1)),
+      type:b.type||"Charge",
+      description:b.description|| (s.ref? ("Load "+s.id+" • "+s.ref):("Load "+s.id)),
+      note:b.note||"Auto-created from load billables",
+      amount:round2(Number(b.customer||0))
+  })) : [ { id:"L"+(Math.floor(Math.random()*9000)+1000), type:"Linehaul", description:s.ref?("Load "+s.id+" • "+s.ref):("Load "+s.id), note:"Auto-created", amount:0 } ];
+
+  const createCustomerInvoice=(s:Load)=>{ const lines=buildInvoiceLinesFromLoad(s); const total=round2(lines.reduce((t,l)=>t+(l.amount||0),0)); invoicesLS.save([{id:"INV-"+(Math.floor(Math.random()*900000)+100000),ref:s.id,customer:cname(s.customerId),status:"Draft",taxPct:0,discount:0,total,lines}, ...(invoicesLS.value||[])]); };
+  const syncInvoiceForLoad=(s:Load)=>{ const list=[...(invoicesLS.value||[])]; const i=list.findIndex(x=>x.ref===s.id); if(i<0) return; const inv=list[i]; if(inv.status!=="Draft") return; const lines=buildInvoiceLinesFromLoad(s); const total=round2(lines.reduce((t,l)=>t+(l.amount||0),0)); list[i]={...inv,customer:cname(s.customerId),lines,total}; invoicesLS.save(list); };
+
+  const upsert=(s:Load)=>{ const exists=(loadsLS.value||[]).some(x=>x.id===s.id); const next=exists? (loadsLS.value||[]).map(x=>x.id===s.id?s:x):[s,...(loadsLS.value||[])]; loadsLS.save(next); if(!exists) createCustomerInvoice(s); else syncInvoiceForLoad(s); };
+  const remove=(id:string)=> loadsLS.save((loadsLS.value||[]).filter(x=>x.id!==id));
+
+  return(<div className="space-y-4">
+    <div className="flex items-center justify-between"><h3 className="text-lg font-semibold">Loads</h3><Btn onClick={()=>setEditing({id:"LOAD-"+(Math.floor(Math.random()*9000)+1000),customerId:ctx.customers[0]?.id||"",mode:"Dray",trade:"Import",origin:"",stop1:"",destination:"",pickup:new Date().toISOString().slice(0,10),status:"planned",equipment:"Container",billables:[{id:"B"+(Math.floor(Math.random()*9000)+1000),type:"Linehaul",description:"Linehaul",carrier:0,customer:0}]})}>+ New</Btn></div>
+    <Card><CardBody className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div><Label>Search</Label><Input value={q} onChange={e=>setQ(e.target.value)} placeholder="ID, ref, origin, destination..."/></div>
+      <div><Label>Status</Label><Input value={status} onChange={e=>setStatus(e.target.value)} placeholder="planned / tendered / delivered"/></div>
+      <div><Label>Mode</Label><Input value={mode} onChange={e=>setMode(e.target.value)} placeholder="Dray / LTL / TL / Parcel"/></div>
+      <div className="self-end"><Btn variant="outline" onClick={()=>csvDownload(filtered,"loads")}>Export CSV</Btn></div>
+    </CardBody></Card>
+    <Card><CardBody className="p-0 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50"><tr>
+          <th className="text-left p-2">ID</th><th className="text-left p-2">Ref</th><th className="text-left p-2">Customer</th><th className="text-left p-2">Carrier</th><th className="text-left p-2">Mode</th><th className="text-left p-2">Equip</th><th className="text-left p-2">Pickup</th><th className="text-left p-2">Status</th><th className="text-right p-2">Carrier $</th><th className="text-right p-2">Customer $</th><th className="text-right p-2">Margin $</th><th className="text-right p-2">Margin %</th><th className="text-right p-2">Actions</th>
+        </tr></thead>
+        <tbody>
+          {filtered.length? filtered.map(s=>{ const t={cust:round2(s.billables.reduce((a,b)=>a+(Number(b.customer)||0),0)),carr:round2(s.billables.reduce((a,b)=>a+(Number(b.carrier)||0),0))}; return (
+            <tr key={s.id} className="odd:bg-white even:bg-gray-50">
+              <td className="p-2 font-medium">{s.id}</td>
+              <td className="p-2">{s.ref||"—"}</td>
+              <td className="p-2">{cname(s.customerId)}</td>
+              <td className="p-2">{carname(s.carrierId)}</td>
+              <td className="p-2">{s.mode}{(s.mode==="Dray"&&s.trade)?(" ("+s.trade+")"):""}</td>
+              <td className="p-2">{s.equipment||"—"}</td>
+              <td className="p-2">{s.pickup||"—"}</td>
+              <td className="p-2">{(()=>{ const st=(s.status||"").toLowerCase(); const tone= st==="delivered"?"ok":(st==="tendered"||st==="in transit")?"warn":st==="cancelled"?"bad":"muted"; return <Badge tone={tone as any}>{s.status}</Badge>; })()}</td>
+              <td className="p-2 text-right">${t.carr.toFixed(2)}</td>
+              <td className="p-2 text-right">${t.cust.toFixed(2)}</td>
+              <td className="p-2 text-right">${margin(t.cust,t.carr).toFixed(2)}</td>
+              <td className="p-2 text-right">{t.cust>0?(marginPct(t.cust,t.carr).toFixed(1)+"%"):"—"}</td>
+              <td className="p-2 text-right"><div className="flex justify-end gap-2">
+                <Btn variant="outline" size="sm" onClick={()=>setEditing(s)}>Edit</Btn>
+                <Btn variant="outline" size="sm" onClick={()=>remove(s.id)}>Del</Btn>
+                <Btn variant="outline" size="sm" onClick={()=>printBOL({...s,customer:cname(s.customerId),carrier:carname(s.carrierId)})}>BOL</Btn>
+              </div></td>
+            </tr>
+          )}) : <tr><td className="p-6 text-center text-gray-500" colSpan={13}>No loads.</td></tr>}
+        </tbody>
+      </table>
+    </CardBody></Card>
+    <EditLoadDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert} ctx={ctx}/>
+  </div>)
+};
+
+const EditLoadDialog:React.FC<{value?:Load;onClose:()=>void;onSave:(s:Load)=>void;ctx:Ctx}>=({value,onClose,onSave,ctx})=>{
+  const [form,setForm]=useState<Load|undefined>(value);
+  useEffect(()=>{ if(value) setForm(value); },[value]);
+  if(!form) return null;
+  const u=<T extends keyof Load>(k:T,v:Load[T])=> setForm({...form,[k]:v});
+  const addLine=(type?:string)=> setForm({...form,billables:[...form.billables,{id:"B"+(Math.floor(Math.random()*9000)+1000),type:type||"Linehaul",description:type||"Linehaul",carrier:0,customer:0}]});
+  const delLine=(id:string)=> setForm({...form,billables:form.billables.filter(b=>b.id!==id)});
+  const save=()=>{ onSave(form); onClose(); };
+  const moneyCell=(val:number,on:(n:number)=>void)=> <NumberInput defaultValue={moneyStr(val)} onBlur={snapMoneyBlur} onChange={e=>on(parseMoney(e.target.value))}/>;
+
+  return(<Modal open={!!value} onClose={onClose} title={"Edit Load • "+form.id} width={920}>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div><Label>Customer</Label>
+        <select className="h-9 border rounded-md px-2 w-full" value={form.customerId} onChange={e=>u("customerId",e.target.value)}>{ctx.customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+      </div>
+      <div><Label>Carrier</Label>
+        <select className="h-9 border rounded-md px-2 w-full" value={form.carrierId||""} onChange={e=>u("carrierId",e.target.value||undefined)}>
+          <option value="">—</option>{ctx.carriers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+      <div><Label>Mode</Label>
+        <select className="h-9 border rounded-md px-2 w-full" value={form.mode} onChange={e=>u("mode",e.target.value)}>
+          <option>Dray</option><option>TL</option><option>LTL</option><option>Parcel</option>
+        </select>
+      </div>
+      {form.mode==="Dray"?(<div><Label>Import/Export</Label>
+        <select className="h-9 border rounded-md px-2 w-full" value={form.trade||"Import"} onChange={e=>u("trade",e.target.value as any)}>
+          <option>Import</option><option>Export</option>
+        </select>
+      </div>):null}
+      <div><Label>Origin</Label><Input value={form.origin||""} onChange={e=>u("origin",e.target.value)}/></div>
+      <div><Label>Stop #1</Label><Input value={form.stop1||""} onChange={e=>u("stop1",e.target.value)}/></div>
+      <div><Label>Destination/Return Location</Label><Input value={form.destination||""} onChange={e=>u("destination",e.target.value)}/></div>
+      <div><Label>Pickup</Label><Input type="date" value={form.pickup||""} onChange={e=>u("pickup",e.target.value)}/></div>
+      <div><Label>Delivery</Label><Input type="date" value={form.delivery||""} onChange={e=>u("delivery",e.target.value)}/></div>
+      <div><Label>Status</Label><Input value={form.status} onChange={e=>u("status",e.target.value)}/></div>
+      <div><Label>Equipment</Label><Input value={form.equipment||""} onChange={e=>u("equipment",e.target.value)}/></div>
+      <div><Label>Container #</Label><Input value={form.containerNo||""} onChange={e=>u("containerNo",e.target.value)}/></div>
+      <div><Label>Trailer #</Label><Input value={form.trailerNo||""} onChange={e=>u("trailerNo",e.target.value)}/></div>
+    </div>
+
+    <div className="mt-4">
+      <div className="flex items-center justify-between">
+        <Label className="!mb-0">Billables</Label>
+        <div className="flex items-center gap-2">
+          <select className="h-9 border rounded-md px-2" defaultValue="" onChange={e=>{ if(e.target.value){ addLine(e.target.value); e.target.value=""; } }}>
+            <option value="">Quick add…</option>
+            {BILLABLE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+          </select>
+          <Btn variant="outline" onClick={()=>addLine("Linehaul")}>+ Line</Btn>
+        </div>
+      </div>
+      <table className="w-full text-sm mt-2">
+        <thead className="bg-gray-50"><tr><th className="p-2 text-left">Type</th><th className="p-2 text-left">Description</th><th className="p-2 text-left">Note</th><th className="p-2 text-right">Carrier $</th><th className="p-2 text-right">Customer $</th><th className="p-2 text-right">Actions</th></tr></thead>
+        <tbody>
+          {form.billables.map((b,i)=>(
+            <tr key={b.id} className="odd:bg-white even:bg-gray-50">
+              <td className="p-2">
+                <select className="h-9 border rounded-md px-2" value={b.type} onChange={e=>{ const copy=[...form.billables]; copy[i]={...b,type:e.target.value}; u("billables",copy); }}>
+                  {BILLABLE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+              </td>
+              <td className="p-2"><Input value={b.description||""} onChange={e=>{ const copy=[...form.billables]; copy[i]={...b,description:e.target.value}; u("billables",copy); }}/></td>
+              <td className="p-2"><Input value={b.note||""} onChange={e=>{ const copy=[...form.billables]; copy[i]={...b,note:e.target.value}; u("billables",copy); }}/></td>
+              <td className="p-2">{moneyCell(b.carrier||0,(n)=>{ const copy=[...form.billables]; copy[i]={...b,carrier:n}; u("billables",copy); })}</td>
+              <td className="p-2">{moneyCell(b.customer||0,(n)=>{ const copy=[...form.billables]; copy[i]={...b,customer:n}; u("billables",copy); })}</td>
+              <td className="p-2 text-right"><Btn variant="outline" size="sm" onClick={()=>delLine(b.id)}>Del</Btn></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <div className="mt-4 flex items-center justify-end gap-2">
+      <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+      <Btn onClick={save}>Save</Btn>
+    </div>
+  </Modal>)
+};
+
+/** ================== Pages: Carriers ================== */
+const Carriers:React.FC=()=>{
+  const carriersLS=useLocalStorage<Carrier[]>("dp_carriers", seedCarriers);
+  const [editing,setEditing]=useState<Carrier|undefined>(); const [q,setQ]=useState("");
+  const filtered=useMemo(()=> (carriersLS.value||[]).filter(c=>(c.name||"").toLowerCase().includes(q.toLowerCase())), [carriersLS.value,q]);
+  const upsert=(c:Carrier)=>{ const ex=(carriersLS.value||[]).some(x=>x.id===c.id); carriersLS.save(ex?(carriersLS.value||[]).map(x=>x.id===c.id?c:x):[c,...(carriersLS.value||[])]); };
+  const remove=(id:string)=> carriersLS.save((carriersLS.value||[]).filter(x=>x.id!==id));
+  return(<div className="space-y-4">
+    <h3 className="text-lg font-semibold">Carriers</h3>
+    <Card><CardBody className="grid grid-cols-1 md:grid-cols-3 gap-3"><div><Label>Search</Label><Input value={q} onChange={e=>setQ(e.target.value)}/></div><div className="self-end"><Btn onClick={()=>setEditing({id:"CAR-"+(Math.floor(Math.random()*9000)+1000),name:"",flagged:false})}>+ New</Btn></div></CardBody></Card>
+    <Card><CardBody className="p-0 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50"><tr><th className="p-2 text-left">Name</th><th className="p-2 text-left">MC#</th><th className="p-2 text-left">DOT#</th><th className="p-2 text-left">Auto Ins</th><th className="p-2 text-left">Cargo Ins</th><th className="p-2 text-left">Bond</th><th className="p-2 text-left">Flag</th><th className="p-2 text-right">Actions</th></tr></thead>
+        <tbody>
+          {filtered.length? filtered.map(c=>(
+            <tr key={c.id} className="odd:bg-white even:bg-gray-50">
+              <td className="p-2 font-medium">{c.name||"—"}</td>
+              <td className="p-2">{c.mcNumber||"—"}</td>
+              <td className="p-2">{c.dotNumber||"—"}</td>
+              <td className="p-2">{c.autoInsProvider||"—"} {c.autoPolicyNo?("#"+c.autoPolicyNo):""} {c.autoExp?("("+c.autoExp+")"):""}</td>
+              <td className="p-2">{c.cargoInsProvider||"—"} {c.cargoPolicyNo?("#"+c.cargoPolicyNo):""} {c.cargoExp?("("+c.cargoExp+")"):""}</td>
+              <td className="p-2">{c.bondDocUrl? <a href={c.bondDocUrl} target="_blank" rel="noreferrer">View</a>:"—"}</td>
+              <td className="p-2">{c.flagged? <Badge tone="bad">Flagged</Badge>: <Badge>OK</Badge>}</td>
+              <td className="p-2 text-right"><div className="flex justify-end gap-2"><Btn variant="outline" size="sm" onClick={()=>setEditing(c)}>Edit</Btn><Btn variant="outline" size="sm" onClick={()=>remove(c.id)}>Del</Btn></div></td>
+            </tr>
+          )): <tr><td className="p-6 text-center text-gray-500" colSpan={8}>No carriers.</td></tr>}
+        </tbody>
+      </table>
+    </CardBody></Card>
+    <EditCarrierDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert}/>
+  </div>)
+};
+
+const EditCarrierDialog:React.FC<{value?:Carrier;onClose:()=>void;onSave:(c:Carrier)=>void}>=({value,onClose,onSave})=>{
+  const [form,setForm]=useState<Carrier|undefined>(value);
+  useEffect(()=>{ if(value) setForm(value); },[value]);
+  if(!form) return null;
+  const u=<T extends keyof Carrier>(k:T,v:Carrier[T])=> setForm({...form,[k]:v});
+  const save=()=>{ onSave(form); onClose(); };
+  return(<Modal open={!!value} onClose={onClose} title={"Edit Carrier • "+form.id}>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="md:col-span-3"><Label>Name</Label><Input value={form.name||""} onChange={e=>u("name",e.target.value)}/></div>
+      <div><Label>MC#</Label><Input value={form.mcNumber||""} onChange={e=>u("mcNumber",e.target.value)}/></div>
+      <div><Label>DOT#</Label><Input value={form.dotNumber||""} onChange={e=>u("dotNumber",e.target.value)}/></div>
+      <div className="md:col-span-3"><Label>Bond Document URL</Label><Input value={form.bondDocUrl||""} onChange={e=>u("bondDocUrl",e.target.value)} placeholder="https://..."/></div>
+      <div><Label>Auto Insurance Provider</Label><Input value={form.autoInsProvider||""} onChange={e=>u("autoInsProvider",e.target.value)}/></div>
+      <div><Label>Policy #</Label><Input value={form.autoPolicyNo||""} onChange={e=>u("autoPolicyNo",e.target.value)}/></div>
+      <div><Label>Expiration</Label><Input type="date" value={form.autoExp||""} onChange={e=>u("autoExp",e.target.value)}/></div>
+      <div><Label>Cargo Insurance Provider</Label><Input value={form.cargoInsProvider||""} onChange={e=>u("cargoInsProvider",e.target.value)}/></div>
+      <div><Label>Policy #</Label><Input value={form.cargoPolicyNo||""} onChange={e=>u("cargoPolicyNo",e.target.value)}/></div>
+      <div><Label>Expiration</Label><Input type="date" value={form.cargoExp||""} onChange={e=>u("cargoExp",e.target.value)}/></div>
+      <div className="md:col-span-3"><label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!!form.flagged} onChange={e=>u("flagged",e.target.checked)}/> Flag carrier</label></div>
+    </div>
+    <div className="mt-4 flex items-center justify-end gap-2"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={save}>Save</Btn></div>
+  </Modal>)
+};
+
+/** ================== Pages: Customers (simple) ================== */
+const Customers:React.FC=()=>{
+  const customersLS=useLocalStorage<Customer[]>("dp_customers", seedCustomers);
+  const [name,setName]=useState(""); const add=()=>{ if(!name.trim()) return; customersLS.save([{id:"CUST-"+(Math.floor(Math.random()*9000)+1000),name:name.trim(),creditActive:true},...(customersLS.value||[])]); setName(""); };
+  return(<div className="space-y-4">
+    <h3 className="text-lg font-semibold">Customers</h3>
+    <Card><CardBody className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="md:col-span-2"><Label>New Customer</Label><Input value={name} onChange={e=>setName(e.target.value)} placeholder="Name"/></div>
+      <div className="self-end"><Btn onClick={add}>+ Add</Btn></div>
+    </CardBody></Card>
+    <Card><CardBody className="p-0 overflow-x-auto">
+      <table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-2 text-left">ID</th><th className="p-2 text-left">Name</th></tr></thead><tbody>
+        {(customersLS.value||[]).map(c=>(<tr key={c.id} className="odd:bg-white even:bg-gray-50"><td className="p-2">{c.id}</td><td className="p-2">{c.name}</td></tr>))}
+      </tbody></table>
+    </CardBody></Card>
+  </div>)
+};
+
+/** ================== Pages: Billing ================== */
+type QuickStatus="All"|"Draft"|"Sent"|"Paid"|"Void";
+const Billing:React.FC<{ctx:Ctx}>=({ctx})=>{
+  const invoicesLS=useLocalStorage<Invoice[]>("dp_invoices", seedInvoices);
+  const [editing,setEditing]=useState<Invoice|undefined>(); const [q,setQ]=useState(""); const [flt,setFlt]=useState<QuickStatus>("All");
+  const filtered=useMemo(()=> (invoicesLS.value||[]).filter(inv=> (flt==="All"||inv.status===flt) && [inv.id,inv.ref,inv.customer].some(x=>(x||"").toLowerCase().includes(q.toLowerCase())) ),[invoicesLS.value,q,flt]);
+  const upsert=(inv:Invoice)=>{ const list=[...(invoicesLS.value||[])]; const i=list.findIndex(x=>x.id===inv.id); if(i>=0) list[i]=inv; else list.unshift(inv); invoicesLS.save(list); };
+  const remove=(id:string)=> invoicesLS.save((invoicesLS.value||[]).filter(x=>x.id!==id));
+  const badgeTone=(s:Invoice["status"])=> s==="Paid"?"ok":s==="Sent"?"warn":s==="Void"?"bad":"muted";
+  return(<div className="space-y-4">
+    <div className="flex items-center justify-between"><h3 className="text-lg font-semibold">Billing</h3><Btn onClick={()=>setEditing({id:"INV-"+(Math.floor(Math.random()*900000)+100000),ref:"",customer:ctx.customers[0]?.name||"",status:"Draft",taxPct:0,discount:0,total:0,lines:[{id:"L"+(Math.floor(Math.random()*9000)+1000),type:"Linehaul",description:"Charge",note:"",amount:0}]})}>+ New Invoice</Btn></div>
+    <Card><CardBody className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div><Label>Search</Label><Input value={q} onChange={e=>setQ(e.target.value)} placeholder="ID, ref, customer"/></div>
+      <div><Label>Status</Label>
+        <select className="h-9 border rounded-md px-2 w-full" value={flt} onChange={e=>setFlt(e.target.value as QuickStatus)}>
+          <option>All</option><option>Draft</option><option>Sent</option><option>Paid</option><option>Void</option>
+        </select>
+      </div>
+      <div className="self-end"><Btn variant="outline" onClick={()=>csvDownload(filtered,"invoices")}>Export CSV</Btn></div>
+    </CardBody></Card>
+    <Card><CardBody className="p-0 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50"><tr><th className="p-2 text-left">ID</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Ref</th><th className="p-2 text-left">Status</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Actions</th></tr></thead>
+        <tbody>
+          {filtered.length? filtered.map(inv=>(
+            <tr key={inv.id} className="odd:bg-white even:bg-gray-50">
+              <td className="p-2 font-medium">{inv.id}</td>
+              <td className="p-2">{inv.customer}</td>
+              <td className="p-2">{inv.ref||"—"}</td>
+              <td className="p-2"><Badge tone={badgeTone(inv.status)}>{inv.status}</Badge></td>
+              <td className="p-2 text-right">${(inv.total||0).toFixed(2)}</td>
+              <td className="p-2 text-right">
+                <div className="flex justify-end gap-2">
+                  <Btn variant="outline" size="sm" onClick={()=>setEditing(inv)} disabled={inv.status!=="Draft"}>Edit</Btn>
+                  <Btn variant="outline" size="sm" onClick={()=>printInvoicePDF(inv)} disabled={inv.status==="Void"}>PDF</Btn>
+                  <Btn variant="outline" size="sm" onClick={()=>remove(inv.id)}>Del</Btn>
+                </div>
+              </td>
+            </tr>
+          )): <tr><td className="p-6 text-center text-gray-500" colSpan={6}>No invoices.</td></tr>}
+        </tbody>
+      </table>
+    </CardBody></Card>
+    <EditInvoiceDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert}/>
+  </div>)
+};
+
+const EditInvoiceDialog:React.FC<{value?:Invoice;onClose:()=>void;onSave:(inv:Invoice)=>void}>=({value,onClose,onSave})=>{
+  const [form,setForm]=useState<Invoice|undefined>(value);
+  useEffect(()=>{ if(value) setForm(value); },[value]);
+  if(!form) return null;
+  const u=<T extends keyof Invoice>(k:T,v:Invoice[T])=> setForm({...form,[k]:v});
+  const addLine=(type?:string)=> setForm({...form,lines:[...form.lines,{id:"L"+(Math.floor(Math.random()*9000)+1000),type:type||"Linehaul",description:type||"Linehaul",note:"",amount:0}]});
+  const delLine=(id:string)=> setForm({...form,lines:form.lines.filter(l=>l.id!==id)});
+  const setAmt=(i:number,v:number)=>{ const copy=[...form.lines]; copy[i]={...copy[i],amount:v}; u("lines",copy); };
+  const total=useMemo(()=> round2((form.lines||[]).reduce((t,l)=>t+(Number(l.amount)||0),0) + ((form.taxPct||0)/100)*((form.lines||[]).reduce((t,l)=>t+(Number(l.amount)||0),0) ) - (form.discount||0)), [form.lines,form.taxPct,form.discount]);
+  useEffect(()=>{ u("total",total); /* eslint-disable-next-line react-hooks/exhaustive-deps */ },[total]);
+  const save=()=>{ onSave(form); onClose(); };
+
+  return(<Modal open={!!value} onClose={onClose} title={"Edit Invoice • "+form.id} width={920}>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div><Label>Customer</Label><Input value={form.customer} onChange={e=>u("customer",e.target.value)}/></div>
+      <div><Label>Reference (Load)</Label><Input value={form.ref||""} onChange={e=>u("ref",e.target.value)}/></div>
+      <div><Label>Status</Label>
+        <select className="h-9 border rounded-md px-2 w-full" value={form.status} onChange={e=>u("status",e.target.value as any)}>
+          <option>Draft</option><option>Sent</option><option>Paid</option><option>Void</option>
+        </select>
+      </div>
+    </div>
+
+    <div className="mt-4">
+      <div className="flex items-center justify-between">
+        <Label className="!mb-0">Lines</Label>
+        <div className="flex items-center gap-2">
+          <select className="h-9 border rounded-md px-2" defaultValue="" onChange={e=>{ if(e.target.value){ addLine(e.target.value); e.target.value=""; } }}>
+            <option value="">Quick add…</option>
+            {BILLABLE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+          </select>
+          <Btn variant="outline" onClick={()=>addLine("Linehaul")}>+ Line</Btn>
+        </div>
+      </div>
+      <table className="w-full text-sm mt-2">
+        <thead className="bg-gray-50"><tr><th className="p-2 text-left">Type</th><th className="p-2 text-left">Description</th><th className="p-2 text-left">Note</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Actions</th></tr></thead>
+        <tbody>
+          {form.lines.map((l,i)=>(
+            <tr key={l.id} className="odd:bg-white even:bg-gray-50">
+              <td className="p-2">
+                <select className="h-9 border rounded-md px-2" value={l.type} onChange={e=>{ const copy=[...form.lines]; copy[i]={...l,type:e.target.value}; u("lines",copy); }}>
+                  {BILLABLE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+              </td>
+              <td className="p-2"><Input value={l.description||""} onChange={e=>{ const copy=[...form.lines]; copy[i]={...l,description:e.target.value}; u("lines",copy); }}/></td>
+              <td className="p-2"><Input value={l.note||""} onChange={e=>{ const copy=[...form.lines]; copy[i]={...l,note:e.target.value}; u("lines",copy); }}/></td>
+              <td className="p-2"><NumberInput defaultValue={moneyStr(l.amount)} onBlur={snapMoneyBlur} onChange={e=>setAmt(i,parseMoney(e.target.value))}/></td>
+              <td className="p-2 text-right"><Btn variant="outline" size="sm" onClick={()=>delLine(l.id)}>Del</Btn></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+      <div><Label>Tax %</Label><NumberInput defaultValue={String(form.taxPct??0)} onBlur={snapMoneyBlur} onChange={e=>u("taxPct",parseMoney(e.target.value))}/></div>
+      <div><Label>Discount $</Label><NumberInput defaultValue={moneyStr(form.discount||0)} onBlur={snapMoneyBlur} onChange={e=>u("discount",parseMoney(e.target.value))}/></div>
+      <div className="self-end text-right font-semibold">Total: ${total.toFixed(2)}</div>
+    </div>
+
+    <div className="mt-4 flex items-center justify-end gap-2">
+      <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+      <Btn onClick={save} disabled={form.status!=="Draft"}>Save</Btn>
+    </div>
+  </Modal>)
+};
+
+/** ================== App Shell ================== */
+type Tab="loads"|"carriers"|"customers"|"billing";
+export default function App(){
+  const { current, logout } = useAuth();
+  const customersLS=useLocalStorage<Customer[]>("dp_customers", seedCustomers);
+  const carriersLS=useLocalStorage<Carrier[]>("dp_carriers", seedCarriers);
+  const ctx={customers:customersLS.value||[], carriers:carriersLS.value||[]};
+  const [tab,setTab]=useState<Tab>("loads");
+  if(!current) return <LoginView onSuccess={()=>setTab("loads")}/>;
+  return(<div className="max-w-6xl mx-auto p-4 space-y-4">
+    <div className="flex items-center justify-between">
+      <div className="text-xl font-semibold">DrayagePro TMS by Hudson Insights</div>
+      <div className="flex items-center gap-2"><span className="text-sm text-gray-600">Signed in as <b>{current.username}</b></span><Btn variant="outline" onClick={logout}>Logout</Btn></div>
+    </div>
+    <div className="flex items-center gap-2">
+      <Btn variant={tab==="loads"?"primary":"outline"} onClick={()=>setTab("loads")}>Loads</Btn>
+      <Btn variant={tab==="carriers"?"primary":"outline"} onClick={()=>setTab("carriers")}>Carriers</Btn>
+      <Btn variant={tab==="customers"?"primary":"outline"} onClick={()=>setTab("customers")}>Customers</Btn>
+      <Btn variant={tab==="billing"?"primary":"outline"} onClick={()=>setTab("billing")}>Billing</Btn>
+    </div>
+    {tab==="loads"&&<Loads ctx={ctx}/>}
+    {tab==="carriers"&&<Carriers/>}
+    {tab==="customers"&&<Customers/>}
+    {tab==="billing"&&<Billing ctx={ctx}/>}
+  </div>)
+}
+
