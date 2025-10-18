@@ -1,1124 +1,146 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 
-/** ========= Minimal UI Primitives (no external deps) ========= */
-const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(" ");
-const Btn: React.FC<
-  React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "outline" | "danger" | "ghost"; size?: "sm" | "md" | "icon" }
-> = ({ variant = "primary", size = "md", className = "", children, ...rest }) => (
-  <button
-    {...rest}
-    className={cx(
-      "rounded-md border inline-flex items-center justify-center select-none",
-      size === "sm" ? "h-8 px-2 text-sm" : size === "icon" ? "h-9 w-9" : "h-9 px-3",
-      variant === "primary" && "bg-blue-600 text-white border-blue-600 hover:bg-blue-700",
-      variant === "outline" && "bg-white text-gray-900 border-gray-300 hover:bg-gray-50",
-      variant === "danger" && "bg-red-600 text-white border-red-600 hover:bg-red-700",
-      variant === "ghost" && "bg-transparent border-transparent hover:bg-gray-100",
-      className
-    )}
-  >
-    {children}
-  </button>
+/**
+ * Customers page — self-contained beta build (no external UI libs, no missing imports)
+ * - Inlines tiny UI primitives
+ * - SSR-safe localStorage hook
+ * - Includes light sanity checks
+ */
+
+/*********************** Tiny UI primitives ************************/
+const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary'|'outline'|'danger'|'ghost', size?: 'sm'|'md'|'icon' }>=({variant='primary',size='md',className='',children,...rest})=> (
+  <button {...rest} className={[
+    'inline-flex items-center justify-center select-none border rounded-md transition-colors',
+    variant==='primary' && 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700',
+    variant==='danger' && 'bg-red-600 text-white border-red-700 hover:bg-red-700',
+    variant==='outline' && 'bg-white text-gray-900 border-gray-300 hover:bg-gray-50',
+    variant==='ghost' && 'bg-transparent text-gray-900 border-transparent hover:bg-gray-50',
+    size==='sm' ? 'h-8 px-2 text-sm' : size==='icon' ? 'h-8 w-8 p-0' : 'h-9 px-3',
+    className
+  ].filter(Boolean).join(' ')}>{children}</button>
 );
-
-const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ className = "", ...p }) => (
-  <input
-    {...p}
-    className={cx(
-      "h-9 w-full rounded-md border border-gray-300 px-2 outline-none focus:ring-2 focus:ring-blue-400",
-      className
-    )}
-  />
-);
-
-const NumberInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ className = "", ...p }) => (
-  <input
-    {...p}
-    inputMode="decimal"
-    className={cx(
-      "h-9 w-full rounded-md border border-gray-300 px-2 text-right tabular-nums outline-none focus:ring-2 focus:ring-blue-400",
-      className
-    )}
-  />
-);
-
-const TextArea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>> = ({ className = "", ...p }) => (
-  <textarea
-    {...p}
-    className={cx(
-      "min-h-[80px] w-full rounded-md border border-gray-300 p-2 outline-none focus:ring-2 focus:ring-blue-400",
-      className
-    )}
-  />
-);
-
-const Label: React.FC<React.LabelHTMLAttributes<HTMLLabelElement>> = ({ className = "", ...rest }) => (
-  <label {...rest} className={cx("block text-sm font-medium text-gray-700 mb-1", className)} />
-);
-
-const Card: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ className = "", ...rest }) => (
-  <div {...rest} className={cx("border rounded-lg bg-white shadow-sm", className)} />
-);
-
-const CardBody: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ className = "", ...rest }) => (
-  <div {...rest} className={cx("p-4", className)} />
-);
-
-const Badge: React.FC<{ tone?: "ok" | "warn" | "danger" | "muted" | "info" }> = ({ tone = "muted", children }) => {
-  const map = {
-    ok: "bg-green-100 text-green-800",
-    warn: "bg-yellow-100 text-yellow-800",
-    danger: "bg-red-100 text-red-800",
-    muted: "bg-gray-100 text-gray-700",
-    info: "bg-blue-100 text-blue-800",
-  } as const;
-  return <span className={cx("text-xs px-2 py-0.5 rounded", map[tone])}>{children}</span>;
+const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (p)=> <input {...p} className={["h-9 px-3 border rounded-md w-full", p.className||''].join(' ')} />;
+const Label: React.FC<React.HTMLAttributes<HTMLLabelElement>> = ({className='',...rest})=> <label {...rest} className={["block text-sm font-medium text-gray-700", className].join(' ')} />;
+const Card: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({className='',...rest})=> <div {...rest} className={["border rounded-lg bg-white", className].join(' ')} />;
+const CardBody: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({className='',...rest})=> <div {...rest} className={["p-4", className].join(' ')} />;
+const Badge: React.FC<{tone?:'ok'|'warn'|'danger'|'muted'|'bad'}> = ({tone='muted', children}) => {
+  const map = { ok:'bg-green-100 text-green-800', warn:'bg-yellow-100 text-yellow-800', danger:'bg-red-100 text-red-800', muted:'bg-gray-100 text-gray-700', bad:'bg-red-100 text-red-800' } as const;
+  return <span className={["text-xs px-2 py-0.5 rounded", map[tone]].join(' ')}>{children}</span>;
 };
 
-const Modal: React.FC<{ open: boolean; onClose: () => void; title?: React.ReactNode; width?: number }> = ({
-  open,
-  onClose,
-  title,
-  width = 960,
-  children,
-}) => {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <Card className="relative w-full" style={{ maxWidth: width }}>
-        <CardBody>
-          <div className="flex items-center justify-between mb-2">
-            <h4 className="font-semibold">{title || ""}</h4>
-            <Btn variant="outline" onClick={onClose}>
-              Close
-            </Btn>
-          </div>
-          {children}
-        </CardBody>
-      </Card>
-    </div>
-  );
-};
-
-/** ========= Utils, Types, Seeds ========= */
-const isClient = () => typeof window !== "undefined" && !!window.localStorage;
-const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
-const parseMoney = (s: any) => {
-  const t = String(s ?? "");
-  const noCommas = t.split(",").join("");
-  const quick = Number(noCommas);
-  if (!Number.isNaN(quick) && Number.isFinite(quick)) return round2(quick);
-  let out = "",
-    seenDot = false;
-  for (let i = 0; i < noCommas.length; i++) {
-    const ch = noCommas[i];
-    if ((ch >= "0" && ch <= "9") || (ch === "-" && out === "") || (ch === "." && !seenDot)) {
-      out += ch;
-      if (ch === ".") seenDot = true;
-    }
-  }
-  const num = parseFloat(out || "0");
-  return round2(Number.isFinite(num) ? num : 0);
-};
-const moneyStr = (n: any) => round2(n || 0).toFixed(2);
-const snapMoneyBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-  try {
-    const el = e.target as HTMLInputElement;
-    el.value = moneyStr(parseMoney(el.value));
-  } catch {}
-};
-
+/*********************** Types & Data ************************/
 export type Customer = { id: string; name: string; creditActive?: boolean };
-export type Carrier = {
-  id: string;
-  name: string;
-  mcNumber?: string;
-  dotNumber?: string;
-};
-export type Billable = { id: string; type: string; description?: string; note?: string; carrier?: number; customer?: number };
-export type Load = {
-  id: string;
-  ref?: string;
-  customerId: string;
-  carrierId?: string;
-  origin?: string;
-  stop1?: string;
-  destination?: string;
-  weight?: string;
-  commodity?: string;
-  containerSize?: string;
-  containerNo?: string;
-  chassisNo?: string;
-  status: string; // planned | tendered | delivered | cancelled
-  billables: Billable[];
-};
+const seedCustomers: Customer[] = [ { id: 'CUST-1001', name: 'Hudson Insights', creditActive: true } ];
 
-export type InvoiceLine = { id: string; type: string; description?: string; note?: string; amount: number };
-export type Invoice = { id: string; ref?: string; customer: string; status: "Draft" | "Sent" | "Paid" | "Void"; lines: InvoiceLine[]; total: number };
-
-const BILLABLE_TYPES = ["Linehaul", "Fuel", "Detention", "Accessorial", "Lumper", "Chassis", "Stopoff", "Storage", "Waiting", "Other"] as const;
-
-const seedCustomers: Customer[] = [{ id: "CUST-1001", name: "Hudson Insights", creditActive: true }];
-const seedCarriers: Carrier[] = [
-  { id: "CAR-2001", name: "Windy City Drayage", mcNumber: "123456", dotNumber: "7654321" },
-  { id: "CAR-2002", name: "Lake Shore Trucking", mcNumber: "246810", dotNumber: "1357911" },
-];
-const seedLoads: Load[] = [
-  {
-    id: "LOAD-3001",
-    ref: "PO-7781",
-    customerId: "CUST-1001",
-    carrierId: "CAR-2001",
-    origin: "CN-LBT Pier E",
-    stop1: "UP Global 1",
-    destination: "CIC Chicago",
-    weight: "39000",
-    commodity: "Consumer Goods",
-    containerSize: "40HC",
-    containerNo: "MSCU1234567",
-    chassisNo: "CH-0091",
-    status: "planned",
-    billables: [
-      { id: "B1", type: "Linehaul", description: "Linehaul", note: "", carrier: 550, customer: 775 },
-      { id: "B2", type: "Fuel", description: "Fuel", note: "Auto", carrier: 50, customer: 75 },
-    ],
-  },
-];
-
-const seedInvoices: Invoice[] = [
-  {
-    id: "INV-9001",
-    ref: "LOAD-3001",
-    customer: "Hudson Insights",
-    status: "Draft",
-    total: 850,
-    lines: [
-      { id: "L1", type: "Linehaul", description: "Load charge", note: "Auto-created", amount: 775 },
-      { id: "L2", type: "Fuel", description: "Surcharge", note: "Auto-created", amount: 75 },
-    ],
-  },
-];
-
-/** ========= Robust localStorage hook (SSR-safe) ========= */
-function useLocalStorage<T>(key: string, seed: T) {
-  const [value, setValue] = useState<T>(() => {
-    if (!isClient()) return seed;
-    try {
-      const raw = window.localStorage.getItem(key);
-      return raw ? (JSON.parse(raw) as T) : seed;
-    } catch {
-      return seed;
-    }
-  });
-  useEffect(() => {
-    if (!isClient()) return;
-    try {
-      window.localStorage.setItem(key, JSON.stringify(value));
-    } catch {}
-  }, [key, value]);
-  const save = (next: T) => {
-    setValue(next);
-    if (!isClient()) return;
-    try {
-      window.localStorage.setItem(key, JSON.stringify(next));
-    } catch {}
-  };
+/*********************** localStorage hook ************************/
+function useLocalStorage<T>(key:string, seed:T){
+  const isClient = () => typeof window !== 'undefined' && !!window.localStorage;
+  const [value,setValue] = useState<T>(()=>{ if(!isClient()) return seed; try{ const raw=window.localStorage.getItem(key); return raw? JSON.parse(raw): seed; }catch{ return seed; } });
+  useEffect(()=>{ if(!isClient()) return; try{ window.localStorage.setItem(key, JSON.stringify(value)); }catch{} },[key,value]);
+  const save=(next:T)=>{ setValue(next); if(!isClient()) return; try{ window.localStorage.setItem(key, JSON.stringify(next)); }catch{} };
   return { value, save } as const;
 }
 
-/** ========= Customers ========= */
-const CustomersPage: React.FC = () => {
-  const customersLS = useLocalStorage<Customer[]>("dp_customers", seedCustomers);
+/*********************** Customers View ************************/
+export default function CustomersView(){
+  const { value: customers, save } = useLocalStorage<Customer[]>("dp_customers", seedCustomers);
   const [editing, setEditing] = useState<Customer | undefined>();
   const [q, setQ] = useState("");
-  const filtered = useMemo(
-    () => (customersLS.value || []).filter((c) => (c.name || "").toLowerCase().includes(q.toLowerCase())),
-    [customersLS.value, q]
-  );
-  const upsert = (c: Customer) => {
-    const ex = (customersLS.value || []).some((x) => x.id === c.id);
-    customersLS.save(ex ? (customersLS.value || []).map((x) => (x.id === c.id ? c : x)) : [c, ...(customersLS.value || [])]);
+
+  const filtered = useMemo(() => (customers||[]).filter(c => (c.name||'').toLowerCase().includes(q.toLowerCase())), [customers, q]);
+
+  const upsert = (c:Customer)=>{
+    const exists = (customers||[]).some(x=>x.id===c.id);
+    const next = exists? customers.map(x=> x.id===c.id? c: x): [c, ...customers];
+    save(next);
   };
-  const remove = (id: string) => customersLS.save((customersLS.value || []).filter((x) => x.id !== id));
+  const remove = (id:string)=> save((customers||[]).filter(x=>x.id!==id));
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <h3 className="text-lg font-semibold">Customers</h3>
       </div>
+
       <Card>
         <CardBody className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <Label>Search</Label>
-            <Input value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input value={q} onChange={e=>setQ(e.target.value)} />
           </div>
           <div className="self-end">
-            <Btn onClick={() => setEditing({ id: "CUST-" + (Math.floor(Math.random() * 9000) + 1000), name: "", creditActive: true })}>
-              + New
-            </Btn>
+            <Btn onClick={()=> setEditing({ id: 'CUST-'+(Math.floor(Math.random()*9000)+1000), name:'', creditActive:true })}>+ New</Btn>
           </div>
         </CardBody>
       </Card>
+
       <Card>
         <CardBody className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="p-2 text-left">ID</th>
                 <th className="p-2 text-left">Name</th>
                 <th className="p-2 text-left">Credit</th>
                 <th className="p-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => (
+              {filtered.length? filtered.map(c=> (
                 <tr key={c.id} className="odd:bg-white even:bg-gray-50">
-                  <td className="p-2">{c.id}</td>
-                  <td className="p-2">{c.name || "—"}</td>
-                  <td className="p-2">{c.creditActive ? <Badge tone="ok">Active</Badge> : <Badge tone="danger">Inactive</Badge>}</td>
+                  <td className="p-2 font-medium">{c.name||'—'}</td>
+                  <td className="p-2">{c.creditActive? <Badge>Active</Badge>: <Badge tone="bad">Inactive</Badge>}</td>
                   <td className="p-2 text-right">
                     <div className="flex justify-end gap-2">
-                      <Btn variant="outline" size="sm" onClick={() => setEditing(c)}>
-                        Edit
-                      </Btn>
-                      <Btn variant="outline" size="sm" onClick={() => remove(c.id)}>
-                        Del
-                      </Btn>
+                      <Btn variant="outline" size="sm" onClick={()=>setEditing(c)}>Edit</Btn>
+                      <Btn variant="danger" size="sm" onClick={()=>remove(c.id)}>Delete</Btn>
                     </div>
                   </td>
                 </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td className="p-6 text-center text-gray-500" colSpan={4}>
-                    No customers.
-                  </td>
-                </tr>
+              )): (
+                <tr><td className="p-6 text-center text-gray-500" colSpan={3}>No customers.</td></tr>
               )}
             </tbody>
           </table>
         </CardBody>
       </Card>
-      <EditCustomerDialog value={editing} onClose={() => setEditing(undefined)} onSave={upsert} />
-    </div>
-  );
-};
 
-const EditCustomerDialog: React.FC<{
-  value?: Customer;
-  onClose: () => void;
-  onSave: (c: Customer) => void;
-}> = ({ value, onClose, onSave }) => {
-  const [form, setForm] = useState<Customer | undefined>(value);
-  useEffect(() => setForm(value), [value]);
-  if (!value || !form) return null;
-  const u = <K extends keyof Customer>(k: K, v: Customer[K]) => setForm({ ...form, [k]: v });
-  const save = () => {
-    onSave(form);
-    onClose();
-  };
-  return (
-    <Modal open={!!value} onClose={onClose} title={"Edit Customer • " + form.id} width={520}>
-      <div className="grid grid-cols-1 gap-3">
-        <div>
-          <Label>Name</Label>
-          <Input value={form.name || ""} onChange={(e) => u("name", e.target.value)} />
-        </div>
-        <div>
-          <Label>Credit</Label>
-          <Btn variant="outline" onClick={() => u("creditActive", !form.creditActive)}>
-            {form.creditActive ? "Set Inactive" : "Set Active"}
-          </Btn>
-        </div>
-      </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <Btn variant="outline" onClick={onClose}>
-          Cancel
-        </Btn>
-        <Btn onClick={save}>Save</Btn>
-      </div>
-    </Modal>
-  );
-};
-
-/** ========= Carriers ========= */
-const CarriersPage: React.FC = () => {
-  const carriersLS = useLocalStorage<Carrier[]>("dp_carriers", seedCarriers);
-  const [editing, setEditing] = useState<Carrier | undefined>();
-  const [q, setQ] = useState("");
-  const filtered = useMemo(
-    () => (carriersLS.value || []).filter((c) => (c.name || "").toLowerCase().includes(q.toLowerCase())),
-    [carriersLS.value, q]
-  );
-  const upsert = (c: Carrier) =>
-    carriersLS.save((carriersLS.value || []).some((x) => x.id === c.id) ? (carriersLS.value || []).map((x) => (x.id === c.id ? c : x)) : [c, ...(carriersLS.value || [])]);
-  const remove = (id: string) => carriersLS.save((carriersLS.value || []).filter((x) => x.id !== id));
-
-  return (
-    <div className="space-y-4">
-      <h3 className="text-lg font-semibold">Carriers</h3>
-      <Card>
-        <CardBody className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <Label>Search</Label>
-            <Input value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-          <div className="self-end">
-            <Btn onClick={() => setEditing({ id: "CAR-" + (Math.floor(Math.random() * 9000) + 1000), name: "" })}>+ New</Btn>
-          </div>
-        </CardBody>
-      </Card>
-      <Card>
-        <CardBody className="p-0 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="p-2 text-left">ID</th>
-                <th className="p-2 text-left">Name</th>
-                <th className="p-2 text-left">MC#</th>
-                <th className="p-2 text-left">DOT#</th>
-                <th className="p-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((c) => (
-                <tr key={c.id} className="odd:bg-white even:bg-gray-50">
-                  <td className="p-2">{c.id}</td>
-                  <td className="p-2">{c.name || "—"}</td>
-                  <td className="p-2">{c.mcNumber || "—"}</td>
-                  <td className="p-2">{c.dotNumber || "—"}</td>
-                  <td className="p-2 text-right">
-                    <div className="flex justify-end gap-2">
-                      <Btn variant="outline" size="sm" onClick={() => setEditing(c)}>
-                        Edit
-                      </Btn>
-                      <Btn variant="outline" size="sm" onClick={() => remove(c.id)}>
-                        Del
-                      </Btn>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td className="p-6 text-center text-gray-500" colSpan={5}>
-                    No carriers.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </CardBody>
-      </Card>
-      <EditCarrierDialog value={editing} onClose={() => setEditing(undefined)} onSave={upsert} />
-    </div>
-  );
-};
-
-const EditCarrierDialog: React.FC<{
-  value?: Carrier;
-  onClose: () => void;
-  onSave: (c: Carrier) => void;
-}> = ({ value, onClose, onSave }) => {
-  const [form, setForm] = useState<Carrier | undefined>(value);
-  useEffect(() => setForm(value), [value]);
-  if (!value || !form) return null;
-  const u = <K extends keyof Carrier>(k: K, v: Carrier[K]) => setForm({ ...form, [k]: v });
-  const save = () => {
-    onSave(form);
-    onClose();
-  };
-  return (
-    <Modal open={!!value} onClose={onClose} title={"Edit Carrier • " + form.id} width={720}>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="md:col-span-3">
-          <Label>Name</Label>
-          <Input value={form.name || ""} onChange={(e) => u("name", e.target.value)} />
-        </div>
-        <div>
-          <Label>MC#</Label>
-          <Input value={form.mcNumber || ""} onChange={(e) => u("mcNumber", e.target.value)} />
-        </div>
-        <div>
-          <Label>DOT#</Label>
-          <Input value={form.dotNumber || ""} onChange={(e) => u("dotNumber", e.target.value)} />
-        </div>
-      </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <Btn variant="outline" onClick={onClose}>
-          Cancel
-        </Btn>
-        <Btn onClick={save}>Save</Btn>
-      </div>
-    </Modal>
-  );
-};
-
-/** ========= Load Board + Detail ========= */
-const LoadBoard: React.FC<{ goDetail: (id: string) => void }> = ({ goDetail }) => {
-  const loadsLS = useLocalStorage<Load[]>("dp_loads", seedLoads);
-  const customersLS = useLocalStorage<Customer[]>("dp_customers", seedCustomers);
-  const carriersLS = useLocalStorage<Carrier[]>("dp_carriers", seedCarriers);
-  const [q, setQ] = useState("");
-
-  const cname = (id?: string) => (customersLS.value.find((c) => c.id === id)?.name ?? "—");
-  const car = (id?: string) => carriersLS.value.find((c) => c.id === id)?.name ?? "—";
-
-  const filtered = useMemo(
-    () =>
-      (loadsLS.value || []).filter((s) =>
-        [s.id, s.ref, s.origin, s.stop1, s.destination, s.containerNo].some((x) =>
-          (x || "").toLowerCase().includes(q.toLowerCase())
-        )
-      ),
-    [loadsLS.value, q]
-  );
-
-  const add = () =>
-    loadsLS.save([
-      {
-        id: "LOAD-" + (Math.floor(Math.random() * 9000) + 1000),
-        customerId: customersLS.value[0]?.id || "CUST-1001",
-        carrierId: carriersLS.value[0]?.id,
-        origin: "",
-        stop1: "",
-        destination: "",
-        weight: "",
-        commodity: "",
-        containerSize: "",
-        containerNo: "",
-        chassisNo: "",
-        status: "planned",
-        billables: [{ id: "B" + (Math.floor(Math.random() * 9000) + 1000), type: "Linehaul", description: "Linehaul", carrier: 0, customer: 0 }],
-      },
-      ...loadsLS.value,
-    ]);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Load Board</h3>
-        <Btn onClick={add}>+ New Load</Btn>
-      </div>
-      <Card>
-        <CardBody className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <Label>Search</Label>
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Load#, origin, destination, container…" />
-          </div>
-        </CardBody>
-      </Card>
-      <Card>
-        <CardBody className="p-0 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="p-2 text-left">Load#</th>
-                <th className="p-2 text-left">Origin</th>
-                <th className="p-2 text-left">Stop #1</th>
-                <th className="p-2 text-left">Destination</th>
-                <th className="p-2 text-left">Carrier</th>
-                <th className="p-2 text-left">Weight</th>
-                <th className="p-2 text-left">Commodity</th>
-                <th className="p-2 text-left">Container Size</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((s) => (
-                <tr key={s.id} className="odd:bg-white even:bg-gray-50">
-                  <td className="p-2">
-                    <button className="text-blue-700 hover:underline" onClick={() => goDetail(s.id)}>
-                      {s.id}
-                    </button>
-                  </td>
-                  <td className="p-2">{s.origin || "—"}</td>
-                  <td className="p-2">{s.stop1 || "—"}</td>
-                  <td className="p-2">{s.destination || "—"}</td>
-                  <td className="p-2">{car(s.carrierId)}</td>
-                  <td className="p-2">{s.weight || "—"}</td>
-                  <td className="p-2">{s.commodity || "—"}</td>
-                  <td className="p-2">{s.containerSize || "—"}</td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td className="p-6 text-center text-gray-500" colSpan={8}>
-                    No loads.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </CardBody>
-      </Card>
-    </div>
-  );
-};
-
-const LoadDetail: React.FC<{ id: string; onBack: () => void }> = ({ id, onBack }) => {
-  const loadsLS = useLocalStorage<Load[]>("dp_loads", seedLoads);
-  const carriersLS = useLocalStorage<Carrier[]>("dp_carriers", seedCarriers);
-
-  const load = loadsLS.value.find((l) => l.id === id);
-  const [form, setForm] = useState<Load | undefined>(load);
-  useEffect(() => setForm(load), [id]); // refresh when id changes
-
-  if (!form) {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Load Not Found</h3>
-          <Btn variant="outline" onClick={onBack}>
-            Back
-          </Btn>
-        </div>
-      </div>
-    );
-  }
-
-  const u = <K extends keyof Load>(k: K, v: Load[K]) => setForm({ ...form, [k]: v });
-  const save = () => {
-    const list = [...loadsLS.value];
-    const i = list.findIndex((x) => x.id === form.id);
-    if (i >= 0) list[i] = form;
-    loadsLS.save(list);
-    onBack();
-  };
-  const addBill = (type?: string) =>
-    setForm({
-      ...form,
-      billables: [
-        ...form.billables,
-        { id: "B" + (Math.floor(Math.random() * 9000) + 1000), type: type || "Linehaul", description: type || "Linehaul", carrier: 0, customer: 0 },
-      ],
-    });
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Load Detail • {form.id}</h3>
-        <div className="flex items-center gap-2">
-          <Btn variant="outline" onClick={onBack}>
-            Back
-          </Btn>
-          <Btn onClick={save}>Save</Btn>
-        </div>
-      </div>
-      <Card>
-        <CardBody className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <Label>Load#</Label>
-            <Input value={form.id} onChange={(e) => u("id", e.target.value)} />
-          </div>
-          <div>
-            <Label>Carrier</Label>
-            <select
-              className="h-9 border rounded-md px-2 w-full"
-              value={form.carrierId || ""}
-              onChange={(e) => u("carrierId", e.target.value || undefined)}
-            >
-              <option value="">—</option>
-              {carriersLS.value.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label>Status</Label>
-            <Input value={form.status} onChange={(e) => u("status", e.target.value)} />
-          </div>
-
-          <div>
-            <Label>Origin</Label>
-            <Input value={form.origin || ""} onChange={(e) => u("origin", e.target.value)} />
-          </div>
-          <div>
-            <Label>Stop #1</Label>
-            <Input value={form.stop1 || ""} onChange={(e) => u("stop1", e.target.value)} />
-          </div>
-          <div>
-            <Label>Destination/Return Location</Label>
-            <Input value={form.destination || ""} onChange={(e) => u("destination", e.target.value)} />
-          </div>
-
-          <div>
-            <Label>Carrier Name</Label>
-            <Input value={carriersLS.value.find((c) => c.id === form.carrierId)?.name || ""} readOnly />
-          </div>
-          <div>
-            <Label>Carrier MC#</Label>
-            <Input value={carriersLS.value.find((c) => c.id === form.carrierId)?.mcNumber || ""} readOnly />
-          </div>
-          <div>
-            <Label>Carrier DOT#</Label>
-            <Input value={carriersLS.value.find((c) => c.id === form.carrierId)?.dotNumber || ""} readOnly />
-          </div>
-
-          <div>
-            <Label>Weight</Label>
-            <Input value={form.weight || ""} onChange={(e) => u("weight", e.target.value)} />
-          </div>
-          <div>
-            <Label>Commodity</Label>
-            <Input value={form.commodity || ""} onChange={(e) => u("commodity", e.target.value)} />
-          </div>
-          <div>
-            <Label>Container Size</Label>
-            <Input value={form.containerSize || ""} onChange={(e) => u("containerSize", e.target.value)} />
-          </div>
-
-          <div>
-            <Label>Container #</Label>
-            <Input value={form.containerNo || ""} onChange={(e) => u("containerNo", e.target.value)} />
-          </div>
-          <div>
-            <Label>Chassis #</Label>
-            <Input value={form.chassisNo || ""} onChange={(e) => u("chassisNo", e.target.value)} />
-          </div>
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardBody>
-          <div className="flex items-center justify-between mb-2">
-            <Label className="!mb-0">Billables</Label>
-            <div className="flex items-center gap-2">
-              <select
-                className="h-9 border rounded-md px-2"
-                defaultValue=""
-                onChange={(e) => {
-                  if (e.target.value) {
-                    addBill(e.target.value);
-                    e.target.value = "";
-                  }
-                }}
-              >
-                <option value="">Quick add…</option>
-                {BILLABLE_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              <Btn variant="outline" onClick={() => addBill("Linehaul")}>
-                + Line
-              </Btn>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="p-2 text-left">Type</th>
-                  <th className="p-2 text-left">Description</th>
-                  <th className="p-2 text-left">Note</th>
-                  <th className="p-2 text-right">Carrier $</th>
-                  <th className="p-2 text-right">Customer $</th>
-                  <th className="p-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {form.billables.map((b, i) => (
-                  <tr key={b.id} className="odd:bg-white even:bg-gray-50">
-                    <td className="p-2">
-                      <select
-                        className="h-9 border rounded-md px-2"
-                        value={b.type}
-                        onChange={(e) => {
-                          const copy = [...form.billables];
-                          copy[i] = { ...b, type: e.target.value };
-                          u("billables", copy);
-                        }}
-                      >
-                        {BILLABLE_TYPES.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="p-2">
-                      <Input
-                        value={b.description || ""}
-                        onChange={(e) => {
-                          const copy = [...form.billables];
-                          copy[i] = { ...b, description: e.target.value };
-                          u("billables", copy);
-                        }}
-                      />
-                    </td>
-                    <td className="p-2">
-                      <Input
-                        value={b.note || ""}
-                        onChange={(e) => {
-                          const copy = [...form.billables];
-                          copy[i] = { ...b, note: e.target.value };
-                          u("billables", copy);
-                        }}
-                      />
-                    </td>
-                    <td className="p-2">
-                      <NumberInput
-                        defaultValue={moneyStr(b.carrier || 0)}
-                        onBlur={snapMoneyBlur}
-                        onChange={(e) => {
-                          const copy = [...form.billables];
-                          copy[i] = { ...b, carrier: parseMoney(e.target.value) };
-                          u("billables", copy);
-                        }}
-                      />
-                    </td>
-                    <td className="p-2">
-                      <NumberInput
-                        defaultValue={moneyStr(b.customer || 0)}
-                        onBlur={snapMoneyBlur}
-                        onChange={(e) => {
-                          const copy = [...form.billables];
-                          copy[i] = { ...b, customer: parseMoney(e.target.value) };
-                          u("billables", copy);
-                        }}
-                      />
-                    </td>
-                    <td className="p-2 text-right">
-                      <Btn
-                        variant="outline"
-                        size="sm"
-                        onClick={() => u("billables", form.billables.filter((x) => x.id !== b.id))}
-                      >
-                        Del
-                      </Btn>
-                    </td>
-                  </tr>
-                ))}
-                {form.billables.length === 0 && (
-                  <tr>
-                    <td className="p-6 text-center text-gray-500" colSpan={6}>
-                      No lines.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardBody>
-      </Card>
-    </div>
-  );
-};
-
-/** ========= Billing (lightweight) ========= */
-const BillingPage: React.FC = () => {
-  const invoicesLS = useLocalStorage<Invoice[]>("dp_invoices", seedInvoices);
-  const loadsLS = useLocalStorage<Load[]>("dp_loads", seedLoads);
-  const customersLS = useLocalStorage<Customer[]>("dp_customers", seedCustomers);
-
-  const [q, setQ] = useState("");
-  const [editing, setEditing] = useState<Invoice | undefined>();
-
-  const filtered = useMemo(
-    () =>
-      (invoicesLS.value || []).filter((inv) =>
-        [inv.id, inv.ref, inv.customer].some((x) => (x || "").toLowerCase().includes(q.toLowerCase()))
-      ),
-    [invoicesLS.value, q]
-  );
-
-  const makeFromLoad = (s: Load) => {
-    const customerName = customersLS.value.find((c) => c.id === s.customerId)?.name || "Customer";
-    const lines: InvoiceLine[] =
-      s.billables.length === 0
-        ? [{ id: "L" + (Math.floor(Math.random() * 9000) + 1000), type: "Linehaul", description: "Charge", note: "", amount: 0 }]
-        : s.billables.map((b, idx) => ({
-            id: "L" + (Math.floor(Math.random() * 9000) + 1000) + "-" + (idx + 1),
-            type: b.type,
-            description: b.description || "Load " + s.id,
-            note: b.note || "",
-            amount: round2(b.customer || 0),
-          }));
-    const total = round2(lines.reduce((t, l) => t + (l.amount || 0), 0));
-    return { id: "INV-" + (Math.floor(Math.random() * 900000) + 100000), ref: s.id, customer: customerName, status: "Draft" as const, lines, total };
-  };
-
-  const addFromLoad = () => {
-    const s = loadsLS.value[0];
-    if (!s) return;
-    invoicesLS.save([makeFromLoad(s), ...invoicesLS.value]);
-  };
-
-  const upsert = (inv: Invoice) => {
-    const list = [...invoicesLS.value];
-    const i = list.findIndex((x) => x.id === inv.id);
-    if (i >= 0) list[i] = inv;
-    else list.unshift(inv);
-    invoicesLS.save(list);
-  };
-
-  const remove = (id: string) => invoicesLS.save(invoicesLS.value.filter((x) => x.id !== id));
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Billing</h3>
-        <Btn onClick={addFromLoad}>+ New from First Load</Btn>
-      </div>
-      <Card>
-        <CardBody className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <Label>Search</Label>
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ID, ref, customer" />
-          </div>
-        </CardBody>
-      </Card>
-      <Card>
-        <CardBody className="p-0 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="p-2 text-left">ID</th>
-                <th className="p-2 text-left">Customer</th>
-                <th className="p-2 text-left">Ref</th>
-                <th className="p-2 text-left">Status</th>
-                <th className="p-2 text-right">Total</th>
-                <th className="p-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((inv) => (
-                <tr key={inv.id} className="odd:bg-white even:bg-gray-50">
-                  <td className="p-2">{inv.id}</td>
-                  <td className="p-2">{inv.customer}</td>
-                  <td className="p-2">{inv.ref || "—"}</td>
-                  <td className="p-2">{inv.status}</td>
-                  <td className="p-2 text-right">${(inv.total || 0).toFixed(2)}</td>
-                  <td className="p-2 text-right">
-                    <div className="flex justify-end gap-2">
-                      <Btn variant="outline" size="sm" onClick={() => setEditing(inv)}>
-                        Edit
-                      </Btn>
-                      <Btn variant="outline" size="sm" onClick={() => remove(inv.id)}>
-                        Del
-                      </Btn>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td className="p-6 text-center text-gray-500" colSpan={6}>
-                    No invoices.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </CardBody>
-      </Card>
-      <EditInvoice value={editing} onClose={() => setEditing(undefined)} onSave={upsert} />
-    </div>
-  );
-};
-
-const EditInvoice: React.FC<{ value?: Invoice; onClose: () => void; onSave: (inv: Invoice) => void }> = ({ value, onClose, onSave }) => {
-  const [form, setForm] = useState<Invoice | undefined>(value);
-  useEffect(() => setForm(value), [value]);
-  if (!value || !form) return null;
-  const u = <K extends keyof Invoice>(k: K, v: Invoice[K]) => setForm({ ...form, [k]: v });
-  const total = useMemo(() => round2((form.lines || []).reduce((t, l) => t + (Number(l.amount) || 0), 0)), [form.lines]);
-  useEffect(() => u("total", total), [total]); // eslint-disable-line
-  const addLine = (type?: string) =>
-    setForm({
-      ...form,
-      lines: [...form.lines, { id: "L" + (Math.floor(Math.random() * 9000) + 1000), type: type || "Linehaul", description: type || "Linehaul", note: "", amount: 0 }],
-    });
-
-  return (
-    <Modal open={!!value} onClose={onClose} title={"Edit Invoice • " + form.id} width={920}>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div>
-          <Label>Customer</Label>
-          <Input value={form.customer} onChange={(e) => u("customer", e.target.value)} />
-        </div>
-        <div>
-          <Label>Reference (Load)</Label>
-          <Input value={form.ref || ""} onChange={(e) => u("ref", e.target.value)} />
-        </div>
-        <div>
-          <Label>Status</Label>
-          <select className="h-9 border rounded-md px-2 w-full" value={form.status} onChange={(e) => u("status", e.target.value as any)}>
-            <option>Draft</option>
-            <option>Sent</option>
-            <option>Paid</option>
-            <option>Void</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <div className="flex items-center justify-between mb-2">
-          <Label className="!mb-0">Lines</Label>
-          <div className="flex items-center gap-2">
-            <select
-              className="h-9 border rounded-md px-2"
-              defaultValue=""
-              onChange={(e) => {
-                if (e.target.value) {
-                  addLine(e.target.value);
-                  e.target.value = "";
-                }
-              }}
-            >
-              <option value="">Quick add…</option>
-              {BILLABLE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-            <Btn variant="outline" onClick={() => addLine("Linehaul")}>
-              + Line
-            </Btn>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="p-2 text-left">Type</th>
-                <th className="p-2 text-left">Description</th>
-                <th className="p-2 text-left">Note</th>
-                <th className="p-2 text-right">Amount</th>
-                <th className="p-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {form.lines.map((l, i) => (
-                <tr key={l.id} className="odd:bg-white even:bg-gray-50">
-                  <td className="p-2">
-                    <select
-                      className="h-9 border rounded-md px-2"
-                      value={l.type}
-                      onChange={(e) => {
-                        const copy = [...form.lines];
-                        copy[i] = { ...l, type: e.target.value };
-                        u("lines", copy);
-                      }}
-                    >
-                      {BILLABLE_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="p-2">
-                    <Input
-                      value={l.description || ""}
-                      onChange={(e) => {
-                        const copy = [...form.lines];
-                        copy[i] = { ...l, description: e.target.value };
-                        u("lines", copy);
-                      }}
-                    />
-                  </td>
-                  <td className="p-2">
-                    <Input
-                      value={l.note || ""}
-                      onChange={(e) => {
-                        const copy = [...form.lines];
-                        copy[i] = { ...l, note: e.target.value };
-                        u("lines", copy);
-                      }}
-                    />
-                  </td>
-                  <td className="p-2">
-                    <NumberInput
-                      defaultValue={moneyStr(l.amount)}
-                      onBlur={snapMoneyBlur}
-                      onChange={(e) => {
-                        const copy = [...form.lines];
-                        copy[i] = { ...l, amount: parseMoney(e.target.value) };
-                        u("lines", copy);
-                      }}
-                    />
-                  </td>
-                  <td className="p-2 text-right">
-                    <Btn variant="outline" size="sm" onClick={() => u("lines", form.lines.filter((x) => x.id !== l.id))}>
-                      Del
-                    </Btn>
-                  </td>
-                </tr>
-              ))}
-              {form.lines.length === 0 && (
-                <tr>
-                  <td className="p-6 text-center text-gray-500" colSpan={5}>
-                    No lines.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="mt-3 text-right font-semibold">Total: ${total.toFixed(2)}</div>
-      </div>
-
-      <div className="mt-4 flex items-center justify-end gap-2">
-        <Btn variant="outline" onClick={onClose}>
-          Cancel
-        </Btn>
-        <Btn onClick={() => (onSave(form), onClose())}>Save</Btn>
-      </div>
-    </Modal>
-  );
-};
-
-/** ========= App Shell (starts on Load Board) ========= */
-type Tab = "loads" | "carriers" | "customers" | "billing";
-
-export default function App() {
-  const [tab, setTab] = useState<Tab>("loads");
-  const [detailId, setDetailId] = useState<string | null>(null);
-
-  return (
-    <div className="max-w-6xl mx-auto p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-xl font-semibold">DrayagePro TMS by Hudson Insights</div>
-        <div className="flex items-center gap-2">
-          <Btn variant={tab === "loads" ? "primary" : "outline"} onClick={() => setTab("loads")}>
-            Load Board
-          </Btn>
-          <Btn variant={tab === "carriers" ? "primary" : "outline"} onClick={() => setTab("carriers")}>
-            Carriers
-          </Btn>
-          <Btn variant={tab === "customers" ? "primary" : "outline"} onClick={() => setTab("customers")}>
-            Customers
-          </Btn>
-          <Btn variant={tab === "billing" ? "primary" : "outline"} onClick={() => setTab("billing")}>
-            Billing
-          </Btn>
-        </div>
-      </div>
-
-      {tab === "loads" &&
-        (detailId ? (
-          <LoadDetail id={detailId} onBack={() => setDetailId(null)} />
-        ) : (
-          <LoadBoard goDetail={(id) => setDetailId(id)} />
-        ))}
-
-      {tab === "carriers" && <CarriersPage />}
-      {tab === "customers" && <CustomersPage />}
-      {tab === "billing" && <BillingPage />}
+      <EditCustomerDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert}/>
     </div>
   );
 }
 
-/* ===== Non-throwing sanity checks ===== */
-try {
-  console.assert(round2(1.239) === 1.24 && round2(1.234) === 1.23, "round2");
-  console.assert(moneyStr(7) === "7.00" && moneyStr(7.2) === "7.20", "moneyStr");
-  console.assert(parseMoney("1,234.50") === 1234.5, "parseMoney");
+function EditCustomerDialog({ value, onClose, onSave }:{ value?:Customer; onClose:()=>void; onSave:(c:Customer)=>void }){
+  const [form,setForm]=useState<Customer|undefined>(value);
+  useEffect(()=> setForm(value), [value]);
+  if(!value) return null;
+  const u=(k:keyof Customer, v:any)=> setForm(f=> ({...(f as Customer), [k]: v}));
+  const commit=()=>{ onSave(form as Customer); onClose(); };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose}/>
+      <Card className="relative w-full max-w-md">
+        <CardBody className="space-y-3">
+          <h4 className="font-semibold">Edit Customer</h4>
+          <div>
+            <Label>Name</Label>
+            <Input value={form?.name||''} onChange={e=>u('name', e.target.value)} />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label>Credit Active</Label>
+            <Btn variant="outline" onClick={()=>u('creditActive', !form?.creditActive)}>{form?.creditActive? 'Set Inactive':'Set Active'}</Btn>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+            <Btn onClick={commit}>Save</Btn>
+          </div>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+// Non-throwing sanity checks
+try{
+  const t: Customer = { id:'TEST', name:'Acme', creditActive:true };
+  console.assert(typeof t.id==='string' && typeof t.name==='string', 'Customer type guard');
 } catch {}
