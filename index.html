@@ -1,23 +1,23 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-/** DrayagePro TMS by Hudson Insights — Beta (single-file, no external deps)
+/** DrayagePro TMS + WMS — Beta (single-file, no external deps)
  * Starts on Load Board
  * Pages:
- *  - Load Board (grid summary of loads)
- *  - Load Detail (edit fields + billables; BOL; draft-invoice resync)
+ *  - Load Board (summary grid + search)
+ *  - Load Detail (full edit; hazmat, tanker, dates/times, values, billables; BOL; resync Draft invoice)
  *  - Customers (credit terms, available credit adjust, total balance)
- *  - Carriers (MC#, DOT#, etc.)
- *  - Billing (invoice aging, status badges, CSV/PDF; guard actions by status)
+ *  - Carriers (MC#, DOT#, insurance basics)
+ *  - Billing (invoice aging, status badges, CSV/PDF; guard actions by status; add-back credit on Paid)
+ *  - Storage Orders (WMS): units, unit desc, commodity, weight, hazmat + class, insured value, daily rate, warehouse
  *
- *  Notes:
- *   - CSV uses CRLF (Windows-style) line endings
- *   - Money parsing displays to two decimals on blur (UI-only)
- *   - Creating a new load auto-creates a Draft invoice mirroring billables
- *   - When a load is created, the customer's available credit is reduced by
- *     the load's total customer charges.
+ * Notes:
+ *  - CSV uses CRLF (Windows-style) line endings
+ *  - Money inputs snap to two decimals on blur (UI-only)
+ *  - Creating a new load auto-creates a Draft invoice mirroring billables
+ *  - Credit logic: subtract on load/storage creation; add back when invoice marked Paid (Admin only)
  */
 
-/**************** UI PRIMITIVES (tiny) ****************/
+/**************** UI PRIMITIVES ****************/
 const Btn: React.FC<
   React.ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: "primary" | "outline" | "danger" | "ghost";
@@ -145,7 +145,9 @@ const csvCRLF = (rows: any[]) => {
 };
 
 /**************** TYPES ****************/
+export type Role = "Admin" | "Broker";
 export type CreditTerms = "Pre-pay" | "Pay Upon Delivery" | "Net-30" | "Net-45" | "Net-60";
+export type User = { username: string; password: string; role: Role };
 export type Customer = {
   id: string;
   name: string;
@@ -168,15 +170,16 @@ export type Carrier = {
   cargoExp?: string;
   flagged?: boolean;
 };
-export type Billable = {
-  id: string;
-  type: string;
-  description?: string;
-  note?: string;
-  carrier: number;
-  customer: number;
-};
-export type LoadStatus = "planned" | "tendered" | "in transit" | "delivered" | "cancelled";
+export type Billable = { id: string; type: string; description?: string; note?: string; carrier: number; customer: number };
+export type LoadStatus =
+  | "Active"
+  | "Tendered"
+  | "Dispatched"
+  | "Picked-up"
+  | "Delivered"
+  | "Returned Empty"
+  | "Invoiced"
+  | "Cancelled";
 export type Load = {
   id: string;
   ref?: string;
@@ -192,8 +195,17 @@ export type Load = {
   containerSize?: string;
   containerNo?: string;
   chassisNo?: string;
-  pickup?: string;
-  delivery?: string;
+  // scheduling fields
+  arrivalDate?: string;
+  lastFreeDay?: string;
+  dispatchDate?: string;
+  deliveryDate?: string;
+  deliveryTime?: string;
+  // safety & value
+  hazmat?: boolean;
+  hazmatClass?: "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+  tankerEndorsed?: boolean;
+  valueUSD?: number;
   status: LoadStatus;
   billables: Billable[];
 };
@@ -212,10 +224,29 @@ export type Invoice = {
   discount: number;
   total: number;
 };
+export type StorageOrder = {
+  id: string;
+  customerId: string;
+  warehouse: string;
+  startDate: string;
+  endDate?: string;
+  units: number;
+  unitDesc: string; // pallets, barrels, totes, etc.
+  commodity?: string;
+  weight?: number;
+  insuredValue?: number;
+  hazmat?: boolean;
+  hazmatClass?: "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+  storageRatePerDay: number;
+};
 
 type LS<T> = { value: T; save: (v: T) => void };
 
 /**************** SEED DATA ****************/
+const seedUsers: User[] = [
+  { username: "admin", password: "admin", role: "Admin" },
+  { username: "broker", password: "broker", role: "Broker" },
+];
 const seedCustomers: Customer[] = [
   { id: "CUST-1001", name: "Hudson Insights", creditActive: true, creditTerms: "Net-30", availableCredit: 100000, totalBalance: 0 },
 ];
@@ -236,9 +267,15 @@ const seedLoads: Load[] = [
     containerSize: "40HC",
     containerNo: "MSCU1234567",
     chassisNo: "CH-0091",
-    pickup: todayISO(),
-    delivery: addDays(todayISO(), 2),
-    status: "planned",
+    arrivalDate: addDays(todayISO(), -1),
+    lastFreeDay: addDays(todayISO(), 5),
+    dispatchDate: todayISO(),
+    deliveryDate: addDays(todayISO(), 2),
+    deliveryTime: "14:00",
+    hazmat: false,
+    tankerEndorsed: false,
+    valueUSD: 250000,
+    status: "Active",
     billables: [
       { id: "B1", type: "Linehaul", description: "Linehaul", note: "", carrier: 550, customer: 775 },
       { id: "B2", type: "Fuel", description: "Fuel", note: "Auto", carrier: 50, customer: 75 },
@@ -263,6 +300,7 @@ const seedInvoices: Invoice[] = [
     ],
   },
 ];
+const seedStorage: StorageOrder[] = [];
 
 /**************** localStorage HOOK ****************/
 function useLocalStorage<T>(key: string, seed: T) {
@@ -291,19 +329,85 @@ function useLocalStorage<T>(key: string, seed: T) {
   return { value, save } as const;
 }
 
+/**************** AUTH ****************/
+function useAuth() {
+  const usersLS = useLocalStorage<User[]>("dp_users", seedUsers);
+  const [session, setSession] = useState<string | null>(() => (isClient() ? window.localStorage.getItem("dp_session") : null));
+  useEffect(() => {
+    const sync = () => setSession(isClient() ? window.localStorage.getItem("dp_session") : null);
+    window.addEventListener("storage", sync);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.removeEventListener("storage", sync);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, []);
+  const login = (u: string, p: string) => {
+    const uname = (u || "").trim().toLowerCase();
+    const found = (usersLS.value || []).find((x) => x.username.trim().toLowerCase() === uname);
+    if (found && found.password === p) {
+      if (isClient()) window.localStorage.setItem("dp_session", found.username);
+      setSession(found.username);
+      return { ok: true, user: found };
+    }
+    return { ok: false };
+  };
+  const logout = () => {
+    if (isClient()) window.localStorage.removeItem("dp_session");
+    setSession(null);
+  };
+  const current = (usersLS.value || []).find((u) => u.username === session) || null;
+  return { users: usersLS.value || [], setUsers: usersLS.save, current, login, logout };
+}
+const LoginView: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
+  const { setUsers, login } = useAuth();
+  const [u, setU] = useState("");
+  const [p, setP] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const submit = () => {
+    if (busy) return;
+    setBusy(true);
+    const r = login(u, p);
+    if (r.ok) {
+      onSuccess();
+    } else {
+      setMsg("Invalid credentials");
+      setBusy(false);
+    }
+  };
+  const reset = () => setUsers(seedUsers);
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center">
+      <Card className="w-full max-w-sm">
+        <CardBody className="space-y-4">
+          <h3 className="text-lg font-semibold">DrayagePro — Sign in</h3>
+          <div>
+            <Label>Username</Label>
+            <Input value={u} onChange={(e) => setU(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="admin / broker" />
+          </div>
+          <div>
+            <Label>Password</Label>
+            <Input type="password" value={p} onChange={(e) => setP(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="admin / broker" />
+          </div>
+          {msg ? <div className="text-red-600 text-sm">{msg}</div> : null}
+          <Btn className="w-full" onClick={submit} disabled={busy}>
+            {busy ? "Signing in..." : "Sign In"}
+          </Btn>
+          <div className="flex items-center justify-between text-xs text-gray-600">
+            <span>Demo users: admin/admin, broker/broker</span>
+            <Btn variant="outline" size="sm" onClick={reset}>
+              Reset users
+            </Btn>
+          </div>
+        </CardBody>
+      </Card>
+    </div>
+  );
+};
+
 /**************** DOMAIN HELPERS ****************/
-const BILLABLE_TYPES = [
-  "Linehaul",
-  "Fuel",
-  "Detention",
-  "Accessorial",
-  "Lumper",
-  "Chassis",
-  "Stopoff",
-  "Storage",
-  "Waiting",
-  "Other",
-];
+const BILLABLE_TYPES = ["Linehaul", "Fuel", "Detention", "Accessorial", "Lumper", "Chassis", "Stopoff", "Storage", "Waiting", "Other"];
 const cname = (customers: Customer[], id?: string) => (customers.find((c) => c.id === id) || ({} as any)).name || "—";
 const carname = (carriers: Carrier[], id?: string) => (carriers.find((c) => c.id === id) || ({} as any)).name || "—";
 const getBillables = (s: Partial<Load>) => (Array.isArray((s as any)?.billables) ? ((s as any).billables as Billable[]) : []);
@@ -314,12 +418,6 @@ const computeTotals = (s: Partial<Load>) => {
     carr: round2(bs.reduce((a, b) => a + (Number(b.carrier) || 0), 0)),
   };
 };
-// Sanity checks (non-throwing)
-try {
-  const t = computeTotals({ billables: [] });
-  console.assert(t.cust === 0 && t.carr === 0, 'computeTotals empty ok');
-  console.assert(parseMoney('$1,234.56') === 1234.56, 'parseMoney basic');
-} catch (e) { console.warn('Sanity checks failed', e); }
 const margin = (cust: number, carr: number) => round2((cust || 0) - (carr || 0));
 const marginPct = (cust: number, carr: number) => {
   const c = Number(cust) || 0;
@@ -333,15 +431,13 @@ function buildInvoiceFromLoad(load: Load, customers: Customer[]): Invoice {
   const bs = getBillables(load);
   const lines: InvoiceLine[] = bs.length
     ? bs.map((b, i) => ({
-        id: 'L' + (Math.floor(Math.random() * 9000) + 1000) + '-' + (i + 1),
+        id: "L" + (Math.floor(Math.random() * 9000) + 1000) + "-" + (i + 1),
         type: b.type,
-        description: b.description || 'Load ' + load.id,
-        note: b.note || 'Auto-from load',
+        description: b.description || "Load " + load.id,
+        note: b.note || "Auto-from load",
         amount: round2(Number(b.customer || 0)),
       }))
-    : [
-        { id: 'L' + (Math.floor(Math.random() * 9000) + 1000), type: 'Linehaul', description: 'Load ' + load.id, note: 'Auto-created', amount: 0 },
-      ];
+    : [{ id: "L" + (Math.floor(Math.random() * 9000) + 1000), type: "Linehaul", description: "Load " + load.id, note: "Auto-created", amount: 0 }];
   const sub = round2(lines.reduce((t, l) => t + (l.amount || 0), 0));
   const customer = customers.find((c) => c.id === load.customerId);
   const issued = todayISO();
@@ -425,7 +521,7 @@ function printInvoicePDF(inv: Invoice) {
 
 /**************** PAGES: LOADS ****************/
 
-type Ctx = { customers: Customer[]; setCustomers: (xs: Customer[]) => void; carriers: Carrier[] };
+type Ctx = { customers: Customer[]; setCustomers: (xs: Customer[]) => void; carriers: Carrier[]; currentUser: User };
 
 const LoadBoard: React.FC<{
   ctx: Ctx;
@@ -437,7 +533,7 @@ const LoadBoard: React.FC<{
   const filtered = useMemo(
     () =>
       (loadsLS.value || []).filter((s) =>
-        [s.id, s.ref, s.origin, s.destination, carname(ctx.carriers, s.carrierId)].some((x) =>
+        [s.id, s.ref, s.origin, s.stop1, s.destination, carname(ctx.carriers, s.carrierId)].some((x) =>
           (x || "").toLowerCase().includes(q.toLowerCase())
         )
       ),
@@ -454,6 +550,11 @@ const LoadBoard: React.FC<{
       weight: s.weight || "",
       commodity: s.commodity || "",
       containerSize: s.containerSize || "",
+      arrivalDate: s.arrivalDate || "",
+      lastFreeDay: s.lastFreeDay || "",
+      dispatchDate: s.dispatchDate || "",
+      deliveryDate: s.deliveryDate || "",
+      deliveryTime: s.deliveryTime || "",
     }));
     const data = csvCRLF(rows);
     const url = URL.createObjectURL(new Blob([data], { type: "text/csv;charset=utf-8;" }));
@@ -477,22 +578,38 @@ const LoadBoard: React.FC<{
       weight: undefined,
       commodity: "",
       containerSize: "",
-      pickup: todayISO(),
-      status: "planned",
+      arrivalDate: undefined,
+      lastFreeDay: undefined,
+      dispatchDate: todayISO(),
+      deliveryDate: undefined,
+      deliveryTime: "",
+      hazmat: false,
+      hazmatClass: undefined,
+      tankerEndorsed: false,
+      valueUSD: undefined,
+      status: "Active",
       billables: [
         { id: "B" + (Math.floor(Math.random() * 9000) + 1000), type: "Linehaul", description: "Linehaul", note: "", carrier: 0, customer: 0 },
       ],
     };
+    // subtotal to check credit
+    const sub = computeTotals(s).cust;
+    const cust = ctx.customers.find((c) => c.id === s.customerId);
+    if (cust && ctx.currentUser.role !== "Admin" && (cust.availableCredit || 0) < sub) {
+      alert("Insufficient available credit for this customer. Please contact an Admin.");
+      return;
+    }
     // create load and auto-create invoice; subtract available credit
     const nextLoads = [s, ...(loadsLS.value || [])];
     loadsLS.save(nextLoads);
     const inv = buildInvoiceFromLoad(s, ctx.customers);
     invoicesLS.save([inv, ...(invoicesLS.value || [])]);
-    const sub = computeTotals(s).cust;
-    const updatedCustomers = (ctx.customers || []).map((c) =>
-      c.id === s.customerId ? { ...c, availableCredit: round2((c.availableCredit || 0) - sub) } : c
-    );
-    ctx.setCustomers(updatedCustomers);
+    if (cust) {
+      const updatedCustomers = (ctx.customers || []).map((c) =>
+        c.id === s.customerId ? { ...c, availableCredit: round2((c.availableCredit || 0) - sub) } : c
+      );
+      ctx.setCustomers(updatedCustomers);
+    }
     onOpen(s.id);
   };
   return (
@@ -520,6 +637,11 @@ const LoadBoard: React.FC<{
                 <th className="p-2 text-left">Weight</th>
                 <th className="p-2 text-left">Commodity</th>
                 <th className="p-2 text-left">Container Size</th>
+                <th className="p-2 text-left">Arrival</th>
+                <th className="p-2 text-left">Last Free Day</th>
+                <th className="p-2 text-left">Dispatch</th>
+                <th className="p-2 text-left">Delivery</th>
+                <th className="p-2 text-left">Time</th>
               </tr>
             </thead>
             <tbody>
@@ -538,11 +660,16 @@ const LoadBoard: React.FC<{
                     <td className="p-2">{s.weight ? s.weight + " lb" : "—"}</td>
                     <td className="p-2">{s.commodity || "—"}</td>
                     <td className="p-2">{s.containerSize || "—"}</td>
+                    <td className="p-2">{s.arrivalDate || "—"}</td>
+                    <td className="p-2">{s.lastFreeDay || "—"}</td>
+                    <td className="p-2">{s.dispatchDate || "—"}</td>
+                    <td className="p-2">{s.deliveryDate || "—"}</td>
+                    <td className="p-2">{s.deliveryTime || "—"}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td className="p-6 text-center text-gray-500" colSpan={8}>
+                  <td className="p-6 text-center text-gray-500" colSpan={13}>
                     No loads.
                   </td>
                 </tr>
@@ -605,7 +732,7 @@ const EditLoad: React.FC<{
     onClose();
   };
   return (
-    <Modal open={!!value} onClose={onClose} title={"Load Detail • " + form.id}>
+    <Modal open={!!value} onClose={onClose} title={"Load Detail • " + form.id} width={980}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
           <Label>Customer</Label>
@@ -638,13 +765,36 @@ const EditLoad: React.FC<{
           </select>
         </div>
         {form.mode === "Dray" ? (
-          <div>
-            <Label>Import/Export</Label>
-            <select className="h-9 border rounded-md px-2 w-full" value={form.trade || "Import"} onChange={(e) => u("trade", e.target.value as any)}>
-              <option>Import</option>
-              <option>Export</option>
-            </select>
-          </div>
+          <>
+            <div>
+              <Label>Import/Export</Label>
+              <select className="h-9 border rounded-md px-2 w-full" value={form.trade || "Import"} onChange={(e) => u("trade", e.target.value as any)}>
+                <option>Import</option>
+                <option>Export</option>
+              </select>
+            </div>
+            <div className="md:col-span-2 flex items-end gap-4">
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={!!form.hazmat} onChange={(e) => u("hazmat", e.target.checked)} /> Hazmat
+              </label>
+              {form.hazmat ? (
+                <select className="h-9 border rounded-md px-2" value={form.hazmatClass || "3"} onChange={(e) => u("hazmatClass", e.target.value as any)}>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
+                  <option value="9">9</option>
+                </select>
+              ) : null}
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={!!form.tankerEndorsed} onChange={(e) => u("tankerEndorsed", e.target.checked)} /> Tanker Endorsed
+              </label>
+            </div>
+          </>
         ) : null}
         <div>
           <Label>Origin</Label>
@@ -679,16 +829,41 @@ const EditLoad: React.FC<{
           <Input value={form.chassisNo || ""} onChange={(e) => u("chassisNo", e.target.value)} />
         </div>
         <div>
-          <Label>Pickup</Label>
-          <Input type="date" value={form.pickup || ""} onChange={(e) => u("pickup", e.target.value)} />
+          <Label>Shipment Value $</Label>
+          <NumberInput defaultValue={form.valueUSD != null ? moneyStr(form.valueUSD) : ""} onBlur={snapMoneyBlur} onChange={(e) => u("valueUSD", parseMoney(e.target.value))} />
         </div>
         <div>
-          <Label>Delivery</Label>
-          <Input type="date" value={form.delivery || ""} onChange={(e) => u("delivery", e.target.value)} />
+          <Label>Arrival</Label>
+          <Input type="date" value={form.arrivalDate || ""} onChange={(e) => u("arrivalDate", e.target.value)} />
+        </div>
+        <div>
+          <Label>Last Free Day</Label>
+          <Input type="date" value={form.lastFreeDay || ""} onChange={(e) => u("lastFreeDay", e.target.value)} />
+        </div>
+        <div>
+          <Label>Dispatch</Label>
+          <Input type="date" value={form.dispatchDate || ""} onChange={(e) => u("dispatchDate", e.target.value)} />
+        </div>
+        <div>
+          <Label>Delivery Date</Label>
+          <Input type="date" value={form.deliveryDate || ""} onChange={(e) => u("deliveryDate", e.target.value)} />
+        </div>
+        <div>
+          <Label>Delivery Time</Label>
+          <Input type="time" value={form.deliveryTime || ""} onChange={(e) => u("deliveryTime", e.target.value)} />
         </div>
         <div>
           <Label>Status</Label>
-          <Input value={form.status} onChange={(e) => u("status", e.target.value as LoadStatus)} />
+          <select className="h-9 border rounded-md px-2 w-full" value={form.status} onChange={(e) => u("status", e.target.value as LoadStatus)}>
+            <option>Active</option>
+            <option>Tendered</option>
+            <option>Dispatched</option>
+            <option>Picked-up</option>
+            <option>Delivered</option>
+            <option>Returned Empty</option>
+            <option>Invoiced</option>
+            <option>Cancelled</option>
+          </select>
         </div>
         <div className="md:col-span-3 p-2 bg-gray-50 rounded">
           <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -920,15 +1095,10 @@ const CarriersView: React.FC = () => {
 
 const EditCarrierDialog: React.FC<{ value?: Carrier; onClose: () => void; onSave: (c: Carrier) => void }> = ({ value, onClose, onSave }) => {
   const [form, setForm] = useState<Carrier | undefined>(value);
-  useEffect(() => {
-    if (value) setForm(value);
-  }, [value]);
+  useEffect(() => { if (value) setForm(value); }, [value]);
   if (!form) return null;
   const u = <K extends keyof Carrier>(k: K, v: Carrier[K]) => setForm({ ...form, [k]: v });
-  const save = () => {
-    onSave(form);
-    onClose();
-  };
+  const save = () => { onSave(form); onClose(); };
   return (
     <Modal open={!!value} onClose={onClose} title={"Edit Carrier • " + form.id}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -979,9 +1149,7 @@ const EditCarrierDialog: React.FC<{ value?: Carrier; onClose: () => void; onSave
         </div>
       </div>
       <div className="mt-4 flex items-center justify-end gap-2">
-        <Btn variant="outline" onClick={onClose}>
-          Cancel
-        </Btn>
+        <Btn variant="outline" onClick={onClose}>Cancel</Btn>
         <Btn onClick={save}>Save</Btn>
       </div>
     </Modal>
@@ -1008,13 +1176,7 @@ const CustomersView: React.FC<{ ctx: { customersLS: LS<Customer[]> } }> = ({ ctx
         <h3 className="text-lg font-semibold">Customers</h3>
         <div className="flex items-center gap-2">
           <Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
-          <Btn
-            onClick={() =>
-              setEditing({ id: "CUST-" + (Math.floor(Math.random() * 9000) + 1000), name: "", creditActive: true, creditTerms: "Net-30", availableCredit: 0, totalBalance: 0 })
-            }
-          >
-            + New
-          </Btn>
+          <Btn onClick={() => setEditing({ id: "CUST-" + (Math.floor(Math.random() * 9000) + 1000), name: "", creditActive: true, creditTerms: "Net-30", availableCredit: 0, totalBalance: 0 })}>+ New</Btn>
         </div>
       </div>
       <Card>
@@ -1039,21 +1201,15 @@ const CustomersView: React.FC<{ ctx: { customersLS: LS<Customer[]> } }> = ({ ctx
                     <td className="p-2">${(c.totalBalance || 0).toFixed(2)}</td>
                     <td className="p-2 text-right">
                       <div className="flex justify-end gap-2">
-                        <Btn variant="outline" size="sm" onClick={() => setEditing(c)}>
-                          Edit
-                        </Btn>
-                        <Btn variant="danger" size="sm" onClick={() => remove(c.id)}>
-                          Del
-                        </Btn>
+                        <Btn variant="outline" size="sm" onClick={() => setEditing(c)}>Edit</Btn>
+                        <Btn variant="danger" size="sm" onClick={() => remove(c.id)}>Del</Btn>
                       </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td className="p-6 text-center text-gray-500" colSpan={5}>
-                    No customers.
-                  </td>
+                  <td className="p-6 text-center text-gray-500" colSpan={5}>No customers.</td>
                 </tr>
               )}
             </tbody>
@@ -1067,24 +1223,19 @@ const CustomersView: React.FC<{ ctx: { customersLS: LS<Customer[]> } }> = ({ ctx
 
 const EditCustomerDialog: React.FC<{ value?: Customer; onClose: () => void; onSave: (c: Customer) => void }> = ({ value, onClose, onSave }) => {
   const [form, setForm] = useState<Customer | undefined>(value);
-  useEffect(() => {
-    if (value) setForm(value);
-  }, [value]);
+  useEffect(() => { if (value) setForm(value); }, [value]);
   if (!form) return null;
   const u = <K extends keyof Customer>(k: K, v: Customer[K]) => setForm({ ...form, [k]: v });
-  const save = () => {
-    onSave(form);
-    onClose();
-  };
+  const save = () => { onSave(form); onClose(); };
   return (
     <Modal open={!!value} onClose={onClose} title={"Edit Customer • " + form.id}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="md:col-span-3">
+        <div className="md:col-span-2">
           <Label>Name</Label>
           <Input value={form.name} onChange={(e) => u("name", e.target.value)} />
         </div>
         <div>
-          <Label>Credit Terms</Label>
+          <Label>Terms</Label>
           <select className="h-9 border rounded-md px-2 w-full" value={form.creditTerms} onChange={(e) => u("creditTerms", e.target.value as CreditTerms)}>
             <option>Pre-pay</option>
             <option>Pay Upon Delivery</option>
@@ -1094,18 +1245,16 @@ const EditCustomerDialog: React.FC<{ value?: Customer; onClose: () => void; onSa
           </select>
         </div>
         <div>
-          <Label>Available Credit ($)</Label>
-          <NumberInput defaultValue={moneyStr(form.availableCredit)} onBlur={snapMoneyBlur} onChange={(e) => u("availableCredit", parseMoney(e.target.value))} />
+          <Label>Available Credit $</Label>
+          <NumberInput defaultValue={moneyStr(form.availableCredit || 0)} onBlur={snapMoneyBlur} onChange={(e) => u("availableCredit", parseMoney(e.target.value))} />
         </div>
         <div>
-          <Label>Total Balance ($)</Label>
-          <NumberInput defaultValue={moneyStr(form.totalBalance)} onBlur={snapMoneyBlur} onChange={(e) => u("totalBalance", parseMoney(e.target.value))} />
+          <Label>Total Balance $</Label>
+          <NumberInput defaultValue={moneyStr(form.totalBalance || 0)} onBlur={snapMoneyBlur} onChange={(e) => u("totalBalance", parseMoney(e.target.value))} />
         </div>
       </div>
       <div className="mt-4 flex items-center justify-end gap-2">
-        <Btn variant="outline" onClick={onClose}>
-          Cancel
-        </Btn>
+        <Btn variant="outline" onClick={onClose}>Cancel</Btn>
         <Btn onClick={save}>Save</Btn>
       </div>
     </Modal>
@@ -1113,12 +1262,18 @@ const EditCustomerDialog: React.FC<{ value?: Customer; onClose: () => void; onSa
 };
 
 /**************** PAGES: BILLING ****************/
+const badgeTone = (s: InvoiceStatus) => (s === "Paid" ? "ok" : s === "Sent" ? "warn" : s === "Void" ? "bad" : "muted") as const;
+const daysPastDue = (inv: Invoice) => {
+  if (!inv.dueOn) return 0;
+  const delta = daysBetween(inv.dueOn, todayISO());
+  return Math.max(0, delta);
+};
 
-type QuickStatus = "All" | InvoiceStatus;
-const BillingView: React.FC<{ ctx: Ctx; invoicesLS: LS<Invoice[]>; loadsLS: LS<Load[]> }> = ({ ctx, invoicesLS }) => {
+const BillingView: React.FC<{ ctx: { customersLS: LS<Customer[]>; currentUser: User } }> = ({ ctx }) => {
+  const invoicesLS = useLocalStorage<Invoice[]>("dp_invoices", seedInvoices);
   const [editing, setEditing] = useState<Invoice | undefined>();
   const [q, setQ] = useState("");
-  const [flt, setFlt] = useState<QuickStatus>("All");
+  const [flt, setFlt] = useState<InvoiceStatus | "All">("All");
   const filtered = useMemo(
     () =>
       (invoicesLS.value || []).filter(
@@ -1129,76 +1284,64 @@ const BillingView: React.FC<{ ctx: Ctx; invoicesLS: LS<Invoice[]>; loadsLS: LS<L
   const upsert = (inv: Invoice) => {
     const list = [...(invoicesLS.value || [])];
     const i = list.findIndex((x) => x.id === inv.id);
-    if (i >= 0) list[i] = inv;
-    else list.unshift(inv);
+    if (i >= 0) list[i] = inv; else list.unshift(inv);
     invoicesLS.save(list);
   };
   const remove = (id: string) => invoicesLS.save((invoicesLS.value || []).filter((x) => x.id !== id));
-  const badgeTone = (s: Invoice["status"]) => (s === "Paid" ? "ok" : s === "Sent" ? "warn" : s === "Void" ? "bad" : "muted");
-  const daysPastDue = (inv: Invoice) => {
-    if (inv.status === "Paid" || inv.status === "Void") return 0;
-    const today = todayISO();
-    return Math.max(0, daysBetween(inv.dueOn || today, today));
+
+  const setStatus = (inv: Invoice, s: InvoiceStatus) => {
+    if (s === inv.status) return;
+    if (s === "Paid" && ctx.currentUser.role !== "Admin") {
+      alert("Only Admin can mark invoices as Paid.");
+      return;
+    }
+    // apply status change and credit add-back on Paid
+    const list = [...(invoicesLS.value || [])];
+    const i = list.findIndex((x) => x.id === inv.id);
+    if (i < 0) return;
+    list[i] = { ...inv, status: s };
+    invoicesLS.save(list);
+    if (s === "Paid") {
+      const updatedCustomers = (ctx.customersLS.value || []).map((c) =>
+        c.id === inv.customerId ? { ...c, availableCredit: round2((c.availableCredit || 0) + (inv.total || 0)) } : c
+      );
+      ctx.customersLS.save(updatedCustomers);
+    }
   };
+
+  const csv = () => {
+    const rows = filtered.map((inv) => ({
+      id: inv.id,
+      customer: inv.customerName,
+      ref: inv.ref || "",
+      status: inv.status,
+      issued: inv.issuedOn,
+      due: inv.dueOn || "",
+      total: inv.total.toFixed(2),
+      daysPastDue: inv.status === "Paid" || inv.status === "Void" ? 0 : daysPastDue(inv),
+    }));
+    const data = csvCRLF(rows);
+    const url = URL.createObjectURL(new Blob([data], { type: "text/csv;charset=utf-8;" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = "invoices.csv"; a.click(); URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Billing</h3>
-        <Btn
-          onClick={() =>
-            setEditing({
-              id: "INV-" + (Math.floor(Math.random() * 900000) + 100000),
-              ref: "",
-              customerId: ctx.customers[0]?.id || "",
-              customerName: ctx.customers[0]?.name || "",
-              issuedOn: todayISO(),
-              dueOn: dueFromTerms(todayISO(), ctx.customers[0]?.creditTerms || "Net-30"),
-              status: "Draft",
-              taxPct: 0,
-              discount: 0,
-              total: 0,
-              lines: [{ id: "L" + (Math.floor(Math.random() * 9000) + 1000), type: "Linehaul", description: "Charge", note: "", amount: 0 }],
-            })
-          }
-        >
-          + New Invoice
-        </Btn>
+        <div className="flex items-center gap-2">
+          <Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
+          <select className="h-9 border rounded-md px-2" value={flt} onChange={(e) => setFlt(e.target.value as any)}>
+            <option>All</option>
+            <option>Draft</option>
+            <option>Sent</option>
+            <option>Paid</option>
+            <option>Void</option>
+          </select>
+          <Btn variant="outline" onClick={csv}>Export CSV</Btn>
+        </div>
       </div>
-      <Card>
-        <CardBody className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div>
-            <Label>Search</Label>
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ID, ref, customer" />
-          </div>
-          <div>
-            <Label>Status</Label>
-            <select className="h-9 border rounded-md px-2 w-full" value={flt} onChange={(e) => setFlt(e.target.value as QuickStatus)}>
-              <option>All</option>
-              <option>Draft</option>
-              <option>Sent</option>
-              <option>Paid</option>
-              <option>Void</option>
-            </select>
-          </div>
-          <div className="self-end">
-            <Btn
-              variant="outline"
-              onClick={() => {
-                const rows = filtered.map((i) => ({ id: i.id, customer: i.customerName, ref: i.ref || "", status: i.status, total: i.total.toFixed(2), issuedOn: i.issuedOn, dueOn: i.dueOn || "" }));
-                const data = csvCRLF(rows);
-                const url = URL.createObjectURL(new Blob([data], { type: "text/csv;charset=utf-8;" }));
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "invoices.csv";
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-            >
-              Export CSV
-            </Btn>
-          </div>
-        </CardBody>
-      </Card>
       <Card>
         <CardBody className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
@@ -1208,6 +1351,8 @@ const BillingView: React.FC<{ ctx: Ctx; invoicesLS: LS<Invoice[]>; loadsLS: LS<L
                 <th className="p-2 text-left">Customer</th>
                 <th className="p-2 text-left">Ref</th>
                 <th className="p-2 text-left">Status</th>
+                <th className="p-2 text-left">Issued</th>
+                <th className="p-2 text-left">Due</th>
                 <th className="p-2 text-left">Aging (days)</th>
                 <th className="p-2 text-right">Total</th>
                 <th className="p-2 text-right">Actions</th>
@@ -1223,234 +1368,261 @@ const BillingView: React.FC<{ ctx: Ctx; invoicesLS: LS<Invoice[]>; loadsLS: LS<L
                     <td className="p-2">
                       <Badge tone={badgeTone(inv.status)}>{inv.status}</Badge>
                     </td>
-                    <td className="p-2">{daysPastDue(inv)}</td>
+                    <td className="p-2">{inv.issuedOn}</td>
+                    <td className="p-2">{inv.dueOn || "—"}</td>
+                    <td className="p-2">{inv.status === "Paid" || inv.status === "Void" ? 0 : daysPastDue(inv)}</td>
                     <td className="p-2 text-right">${(inv.total || 0).toFixed(2)}</td>
                     <td className="p-2 text-right">
                       <div className="flex justify-end gap-2">
-                        <Btn variant="outline" size="sm" onClick={() => setEditing(inv)} disabled={inv.status !== "Draft"}>
-                          Edit
-                        </Btn>
+                        <select className="h-8 border rounded-md px-2" value={inv.status} onChange={(e) => setStatus(inv, e.target.value as InvoiceStatus)}>
+                          <option>Draft</option>
+                          <option>Sent</option>
+                          <option>Paid</option>
+                          <option>Void</option>
+                        </select>
                         <Btn variant="outline" size="sm" onClick={() => printInvoicePDF(inv)} disabled={inv.status === "Void"}>
                           PDF
                         </Btn>
-                        <Btn variant="danger" size="sm" onClick={() => remove(inv.id)}>
-                          Del
-                        </Btn>
+                        <Btn variant="danger" size="sm" onClick={() => remove(inv.id)}>Del</Btn>
                       </div>
                     </td>
                   </tr>
                 ))
               ) : (
-                <tr>
-                  <td className="p-6 text-center text-gray-500" colSpan={7}>
-                    No invoices.
-                  </td>
-                </tr>
+                <tr><td className="p-6 text-center text-gray-500" colSpan={9}>No invoices.</td></tr>
               )}
             </tbody>
           </table>
         </CardBody>
       </Card>
-      <EditInvoiceDialog value={editing} onClose={() => setEditing(undefined)} onSave={upsert} customers={ctx.customers} />
+      {editing ? null : null}
     </div>
   );
 };
 
-const EditInvoiceDialog: React.FC<{ value?: Invoice; onClose: () => void; onSave: (inv: Invoice) => void; customers: Customer[] }> = ({ value, onClose, onSave, customers }) => {
-  const [form, setForm] = useState<Invoice | undefined>(value);
-  useEffect(() => {
-    if (value) setForm(value);
-  }, [value]);
-  if (!form) return null;
-  function u<K extends keyof Invoice>(k: K, v: Invoice[K]) {
-    setForm({ ...form, [k]: v });
-  }
-  const addLine = (type?: string) =>
-    setForm({
-      ...form,
-      lines: [
-        ...form.lines,
-        { id: "L" + (Math.floor(Math.random() * 9000) + 1000), type: type || "Linehaul", description: type || "Linehaul", note: "", amount: 0 },
-      ],
-    });
-  const delLine = (id: string) => setForm({ ...form, lines: form.lines.filter((l) => l.id !== id) });
-  const setAmt = (i: number, v: number) => {
-    const copy = [...form.lines];
-    copy[i] = { ...copy[i], amount: v };
-    u("lines", copy);
-  };
-  const total = useMemo(
-    () =>
-      round2(
-        (form.lines || []).reduce((t, l) => t + (Number(l.amount) || 0), 0) +
-          ((form.taxPct || 0) / 100) * (form.lines || []).reduce((t, l) => t + (Number(l.amount) || 0), 0) -
-          (form.discount || 0)
-      ),
-    [form.lines, form.taxPct, form.discount]
+/**************** PAGES: STORAGE (WMS) ****************/
+const DEFAULT_WAREHOUSE = "Acme Transportation University Park - 2545 Palmer Ave, University Park, IL 60484";
+const StorageView: React.FC<{ ctx: { customers: Customer[]; customersLS: LS<Customer[]> } }> = ({ ctx }) => {
+  const storageLS = useLocalStorage<StorageOrder[]>("dp_storage", seedStorage);
+  const [editing, setEditing] = useState<StorageOrder | undefined>();
+  const [q, setQ] = useState("");
+  const filtered = useMemo(
+    () => (storageLS.value || []).filter((o) => [o.id, o.warehouse, cname(ctx.customers, o.customerId)].some((x) => (x || "").toLowerCase().includes(q.toLowerCase()))),
+    [storageLS.value, q, ctx.customers]
   );
-  useEffect(() => {
-    u("total", total);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [total]);
-  const save = () => {
-    onSave(form);
-    onClose();
+  const upsert = (o: StorageOrder) => {
+    const ex = (storageLS.value || []).some((x) => x.id === o.id);
+    storageLS.save(ex ? (storageLS.value || []).map((x) => (x.id === o.id ? o : x)) : [o, ...(storageLS.value || [])]);
   };
+  const remove = (id: string) => storageLS.save((storageLS.value || []).filter((x) => x.id !== id));
+
+  const newOrder = () => {
+    const o: StorageOrder = {
+      id: "STO-" + (Math.floor(Math.random() * 9000) + 1000),
+      customerId: ctx.customers[0]?.id || "",
+      warehouse: DEFAULT_WAREHOUSE,
+      startDate: todayISO(),
+      endDate: undefined,
+      units: 0,
+      unitDesc: "Pallets",
+      commodity: "",
+      weight: undefined,
+      insuredValue: undefined,
+      hazmat: false,
+      hazmatClass: undefined,
+      storageRatePerDay: 0,
+    };
+    setEditing(o);
+  };
+
+  const estimate = (o: StorageOrder) => {
+    const days = Math.max(1, daysBetween(o.startDate, o.endDate || todayISO()));
+    return round2(days * (o.storageRatePerDay || 0) * (o.units || 0));
+  };
+
+  const createAndDeductCredit = (o: StorageOrder) => {
+    upsert(o);
+    const est = estimate(o);
+    const updated = (ctx.customersLS.value || []).map((c) => (c.id === o.customerId ? { ...c, availableCredit: round2((c.availableCredit || 0) - est) } : c));
+    ctx.customersLS.save(updated);
+  };
+
+  const csv = () => {
+    const rows = filtered.map((o) => ({
+      id: o.id,
+      customer: cname(ctx.customers, o.customerId),
+      warehouse: o.warehouse,
+      start: o.startDate,
+      end: o.endDate || "",
+      units: o.units,
+      unitDesc: o.unitDesc,
+      ratePerDay: o.storageRatePerDay.toFixed(2),
+      estimate: estimate(o).toFixed(2),
+      hazmat: o.hazmat ? "Yes" : "No",
+      hazmatClass: o.hazmatClass || "",
+      weight: o.weight || "",
+      insuredValue: o.insuredValue ? o.insuredValue.toFixed(2) : "",
+      commodity: o.commodity || "",
+    }));
+    const data = csvCRLF(rows);
+    const url = URL.createObjectURL(new Blob([data], { type: "text/csv;charset=utf-8;" }));
+    const a = document.createElement("a"); a.href = url; a.download = "storage-orders.csv"; a.click(); URL.revokeObjectURL(url);
+  };
+
   return (
-    <Modal open={!!value} onClose={onClose} title={"Edit Invoice • " + form.id} width={920}>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Storage Orders (WMS)</h3>
+        <div className="flex items-center gap-2">
+          <Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
+          <Btn variant="outline" onClick={csv}>Export CSV</Btn>
+          <Btn onClick={newOrder}>+ New Storage</Btn>
+        </div>
+      </div>
+      <Card>
+        <CardBody className="p-0 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="p-2 text-left">ID</th>
+                <th className="p-2 text-left">Customer</th>
+                <th className="p-2 text-left">Warehouse</th>
+                <th className="p-2 text-left">Start</th>
+                <th className="p-2 text-left">End</th>
+                <th className="p-2 text-left">Units</th>
+                <th className="p-2 text-left">Unit Desc</th>
+                <th className="p-2 text-left">Rate/Day</th>
+                <th className="p-2 text-left">Estimate</th>
+                <th className="p-2 text-left">Hazmat</th>
+                <th className="p-2 text-left">Class</th>
+                <th className="p-2 text-left">Weight</th>
+                <th className="p-2 text-left">Insured Value</th>
+                <th className="p-2 text-left">Commodity</th>
+                <th className="p-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length ? (
+                filtered.map((o) => (
+                  <tr key={o.id} className="odd:bg-white even:bg-gray-50">
+                    <td className="p-2 font-medium">{o.id}</td>
+                    <td className="p-2">{cname(ctx.customers, o.customerId)}</td>
+                    <td className="p-2">{o.warehouse}</td>
+                    <td className="p-2">{o.startDate}</td>
+                    <td className="p-2">{o.endDate || "—"}</td>
+                    <td className="p-2">{o.units}</td>
+                    <td className="p-2">{o.unitDesc}</td>
+                    <td className="p-2">${(o.storageRatePerDay || 0).toFixed(2)}</td>
+                    <td className="p-2">${estimate(o).toFixed(2)}</td>
+                    <td className="p-2">{o.hazmat ? "Yes" : "No"}</td>
+                    <td className="p-2">{o.hazmatClass || "—"}</td>
+                    <td className="p-2">{o.weight ? o.weight + " lb" : "—"}</td>
+                    <td className="p-2">{o.insuredValue != null ? "$" + (o.insuredValue || 0).toFixed(2) : "—"}</td>
+                    <td className="p-2">{o.commodity || "—"}</td>
+                    <td className="p-2 text-right">
+                      <div className="flex justify-end gap-2">
+                        <Btn variant="outline" size="sm" onClick={() => setEditing(o)}>Edit</Btn>
+                        <Btn variant="danger" size="sm" onClick={() => remove(o.id)}>Del</Btn>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr><td className="p-6 text-center text-gray-500" colSpan={15}>No storage orders.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </CardBody>
+      </Card>
+
+      <EditStorageDialog value={editing} onClose={() => setEditing(undefined)} onSave={createAndDeductCredit} customers={ctx.customers} />
+    </div>
+  );
+};
+
+const EditStorageDialog: React.FC<{
+  value?: StorageOrder; onClose: () => void; onSave: (o: StorageOrder) => void; customers: Customer[];
+}> = ({ value, onClose, onSave, customers }) => {
+  const [form, setForm] = useState<StorageOrder | undefined>(value);
+  useEffect(() => { if (value) setForm(value); }, [value]);
+  if (!form) return null;
+  const u = <K extends keyof StorageOrder>(k: K, v: StorageOrder[K]) => setForm({ ...form, [k]: v });
+  const save = () => { onSave(form); onClose(); };
+  const days = Math.max(1, daysBetween(form.startDate, form.endDate || todayISO()));
+  const estimate = round2(days * (form.storageRatePerDay || 0) * (form.units || 0));
+  return (
+    <Modal open={!!value} onClose={onClose} title={"Storage Order • " + form.id}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
           <Label>Customer</Label>
-          <select
-            className="h-9 border rounded-md px-2 w-full"
-            value={form.customerId}
-            onChange={(e) => {
-              const id = e.target.value;
-              const c = customers.find((x) => x.id === id);
-              u("customerId", id);
-              u("customerName", c?.name || "");
-              u("dueOn", dueFromTerms(form.issuedOn, c?.creditTerms || "Net-30"));
-            }}
-          >
+          <select className="h-9 border rounded-md px-2 w-full" value={form.customerId} onChange={(e) => u("customerId", e.target.value)}>
             {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
         </div>
-        <div>
-          <Label>Reference (Load)</Label>
-          <Input value={form.ref || ""} onChange={(e) => u("ref", e.target.value)} />
+        <div className="md:col-span-2">
+          <Label>Warehouse</Label>
+          <Input value={form.warehouse} onChange={(e) => u("warehouse", e.target.value)} placeholder={DEFAULT_WAREHOUSE} />
         </div>
         <div>
-          <Label>Status</Label>
-          <select className="h-9 border rounded-md px-2 w-full" value={form.status} onChange={(e) => u("status", e.target.value as any)}>
-            <option>Draft</option>
-            <option>Sent</option>
-            <option>Paid</option>
-            <option>Void</option>
-          </select>
+          <Label>Start</Label>
+          <Input type="date" value={form.startDate} onChange={(e) => u("startDate", e.target.value)} />
         </div>
-      </div>
-
-      <div className="mt-4">
-        <div className="flex items-center justify-between">
-          <Label className="!mb-0">Lines</Label>
-          <div className="flex items-center gap-2">
-            <select
-              className="h-9 border rounded-md px-2"
-              defaultValue=""
-              onChange={(e) => {
-                if (e.target.value) {
-                  addLine(e.target.value);
-                  e.target.value = "";
-                }
-              }}
-            >
-              <option value="">Quick add…</option>
-              {BILLABLE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-            <Btn variant="outline" onClick={() => addLine("Linehaul")}>
-              + Line
-            </Btn>
+        <div>
+          <Label>End</Label>
+          <Input type="date" value={form.endDate || ""} onChange={(e) => u("endDate", e.target.value)} />
+        </div>
+        <div>
+          <Label>Units</Label>
+          <NumberInput defaultValue={String(form.units || 0)} onBlur={snapMoneyBlur} onChange={(e) => u("units", parseMoney(e.target.value))} />
+        </div>
+        <div>
+          <Label>Unit Description</Label>
+          <Input value={form.unitDesc} onChange={(e) => u("unitDesc", e.target.value)} placeholder="Pallets, barrels, totes…" />
+        </div>
+        <div>
+          <Label>Commodity</Label>
+          <Input value={form.commodity || ""} onChange={(e) => u("commodity", e.target.value)} />
+        </div>
+        <div>
+          <Label>Weight (lb)</Label>
+          <NumberInput defaultValue={form.weight != null ? String(form.weight) : ""} onBlur={snapMoneyBlur} onChange={(e) => u("weight", parseMoney(e.target.value))} />
+        </div>
+        <div>
+          <Label>Insured Value $</Label>
+          <NumberInput defaultValue={form.insuredValue != null ? moneyStr(form.insuredValue) : ""} onBlur={snapMoneyBlur} onChange={(e) => u("insuredValue", parseMoney(e.target.value))} />
+        </div>
+        <div>
+          <Label>Hazmat</Label>
+          <div className="flex items-center gap-3">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={!!form.hazmat} onChange={(e) => u("hazmat", e.target.checked)} /> Hazmat
+            </label>
+            {form.hazmat ? (
+              <select className="h-9 border rounded-md px-2" value={form.hazmatClass || "3"} onChange={(e) => u("hazmatClass", e.target.value as any)}>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+              </select>
+            ) : null}
           </div>
         </div>
-        <table className="w-full text-sm mt-2">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="p-2 text-left">Type</th>
-              <th className="p-2 text-left">Description</th>
-              <th className="p-2 text-left">Note</th>
-              <th className="p-2 text-right">Amount</th>
-              <th className="p-2 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {form.lines.map((l, i) => (
-              <tr key={l.id} className="odd:bg-white even:bg-gray-50">
-                <td className="p-2">
-                  <select
-                    className="h-9 border rounded-md px-2"
-                    value={l.type}
-                    onChange={(e) => {
-                      const copy = [...form.lines];
-                      copy[i] = { ...l, type: e.target.value };
-                      u("lines", copy);
-                    }}
-                  >
-                    {BILLABLE_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="p-2">
-                  <Input
-                    value={l.description || ""}
-                    onChange={(e) => {
-                      const copy = [...form.lines];
-                      copy[i] = { ...l, description: e.target.value };
-                      u("lines", copy);
-                    }}
-                  />
-                </td>
-                <td className="p-2">
-                  <Input
-                    value={l.note || ""}
-                    onChange={(e) => {
-                      const copy = [...form.lines];
-                      copy[i] = { ...l, note: e.target.value };
-                      u("lines", copy);
-                    }}
-                  />
-                </td>
-                <td className="p-2">
-                  <NumberInput defaultValue={moneyStr(l.amount)} onBlur={snapMoneyBlur} onChange={(e) => setAmt(i, parseMoney(e.target.value))} />
-                </td>
-                <td className="p-2 text-right">
-                  <Btn variant="outline" size="sm" onClick={() => delLine(l.id)}>
-                    Del
-                  </Btn>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div>
+          <Label>Rate per Day $</Label>
+          <NumberInput defaultValue={moneyStr(form.storageRatePerDay || 0)} onBlur={snapMoneyBlur} onChange={(e) => u("storageRatePerDay", parseMoney(e.target.value))} />
+        </div>
+        <div className="md:col-span-3 text-right text-sm">Estimated Charge: ${estimate.toFixed(2)} (units × rate × days)</div>
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-        <div>
-          <Label>Issued On</Label>
-          <Input type="date" value={form.issuedOn} onChange={(e) => u("issuedOn", e.target.value)} />
-        </div>
-        <div>
-          <Label>Due On</Label>
-          <Input type="date" value={form.dueOn || ""} onChange={(e) => u("dueOn", e.target.value)} />
-        </div>
-        <div className="self-end text-right font-semibold">Total: ${total.toFixed(2)}</div>
-        <div>
-          <Label>Tax %</Label>
-          <NumberInput defaultValue={String(form.taxPct ?? 0)} onBlur={snapMoneyBlur} onChange={(e) => u("taxPct", parseMoney(e.target.value))} />
-        </div>
-        <div>
-          <Label>Discount $</Label>
-          <NumberInput defaultValue={moneyStr(form.discount || 0)} onBlur={snapMoneyBlur} onChange={(e) => u("discount", parseMoney(e.target.value))} />
-        </div>
-      </div>
-
       <div className="mt-4 flex items-center justify-end gap-2">
-        <Btn variant="outline" onClick={onClose}>
-          Cancel
-        </Btn>
-        <Btn onClick={save} disabled={form.status !== "Draft"}>
-          Save
-        </Btn>
+        <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={save}>Save</Btn>
       </div>
     </Modal>
   );
@@ -1458,57 +1630,55 @@ const EditInvoiceDialog: React.FC<{ value?: Invoice; onClose: () => void; onSave
 
 /**************** APP SHELL ****************/
 
-type Tab = "loads" | "carriers" | "customers" | "billing";
+type Tab = "loads" | "carriers" | "customers" | "billing" | "storage";
 export default function App() {
+  const { current, logout } = useAuth();
   const customersLS = useLocalStorage<Customer[]>("dp_customers", seedCustomers);
   const carriersLS = useLocalStorage<Carrier[]>("dp_carriers", seedCarriers);
   const loadsLS = useLocalStorage<Load[]>("dp_loads", seedLoads);
   const invoicesLS = useLocalStorage<Invoice[]>("dp_invoices", seedInvoices);
+  const storageLS = useLocalStorage<StorageOrder[]>("dp_storage", seedStorage);
 
-  const [tab, setTab] = useState<Tab>("loads"); // start on Load Board
+  const ctx: Ctx = { customers: customersLS.value || [], setCustomers: customersLS.save, carriers: carriersLS.value || [], currentUser: current || seedUsers[0] };
+
+  const [tab, setTab] = useState<Tab>("loads"); // default to Load Board
   const [openLoadId, setOpenLoadId] = useState<string | undefined>();
-
-  const ctx: Ctx = {
-    customers: customersLS.value || [],
-    setCustomers: customersLS.save,
-    carriers: carriersLS.value || [],
-  };
-
   const openLoad = (id: string) => setOpenLoadId(id);
-  const closeLoad = () => setOpenLoadId(undefined);
-  const upsertLoad = (s: Load) => {
-    const ex = (loadsLS.value || []).some((x) => x.id === s.id);
-    loadsLS.save(ex ? (loadsLS.value || []).map((x) => (x.id === s.id ? s : x)) : [s, ...(loadsLS.value || [])]);
+  const currentLoad = (loadsLS.value || []).find((x) => x.id === openLoadId);
+  const saveLoad = (s: Load) => {
+    const exists = (loadsLS.value || []).some((x) => x.id === s.id);
+    const next = exists ? (loadsLS.value || []).map((x) => (x.id === s.id ? s : x)) : [s, ...(loadsLS.value || [])];
+    loadsLS.save(next);
   };
 
-  const editingLoad = (loadsLS.value || []).find((x) => x.id === openLoadId);
+  if (!current) return <LoginView onSuccess={() => setTab("loads")} />;
 
   return (
-    <div className="max-w-6xl mx-auto p-4 space-y-4">
+    <div className="max-w-7xl mx-auto p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-xl font-semibold">DrayagePro TMS by Hudson Insights</div>
-        <div className="flex items-center gap-2">
-          <Btn variant={tab === "loads" ? "primary" : "outline"} onClick={() => setTab("loads")}>
-            Load Board
-          </Btn>
-          <Btn variant={tab === "carriers" ? "primary" : "outline"} onClick={() => setTab("carriers")}>
-            Carriers
-          </Btn>
-          <Btn variant={tab === "customers" ? "primary" : "outline"} onClick={() => setTab("customers")}>
-            Customers
-          </Btn>
-          <Btn variant={tab === "billing" ? "primary" : "outline"} onClick={() => setTab("billing")}>
-            Billing
-          </Btn>
+        <div className="text-xl font-semibold">DrayagePro TMS + WMS</div>
+        <div className="flex items-center gap-2 text-sm text-gray-700">
+          <span>
+            Signed in as <b>{current.username}</b> ({current.role})
+          </span>
+          <Btn variant="outline" onClick={logout}>Logout</Btn>
         </div>
       </div>
+      <div className="flex items-center gap-2">
+        <Btn variant={tab === "loads" ? "primary" : "outline"} onClick={() => setTab("loads")}>Load Board</Btn>
+        <Btn variant={tab === "carriers" ? "primary" : "outline"} onClick={() => setTab("carriers")}>Carriers</Btn>
+        <Btn variant={tab === "customers" ? "primary" : "outline"} onClick={() => setTab("customers")}>Customers</Btn>
+        <Btn variant={tab === "billing" ? "primary" : "outline"} onClick={() => setTab("billing")}>Billing</Btn>
+        <Btn variant={tab === "storage" ? "primary" : "outline"} onClick={() => setTab("storage")}>Storage</Btn>
+      </div>
 
-      {tab === "loads" && <LoadBoard ctx={ctx} loadsLS={loadsLS as any} invoicesLS={invoicesLS as any} onOpen={openLoad} />}
+      {tab === "loads" && <LoadBoard ctx={ctx} loadsLS={loadsLS} invoicesLS={invoicesLS} onOpen={openLoad} />}
       {tab === "carriers" && <CarriersView />}
       {tab === "customers" && <CustomersView ctx={{ customersLS }} />}
-      {tab === "billing" && <BillingView ctx={ctx} invoicesLS={invoicesLS as any} loadsLS={loadsLS as any} />}
+      {tab === "billing" && <BillingView ctx={{ customersLS, currentUser: current }} />}
+      {tab === "storage" && <StorageView ctx={{ customers: ctx.customers, customersLS }} />}
 
-      <EditLoad ctx={ctx} value={editingLoad} onClose={closeLoad} onSave={upsertLoad} invoicesLS={invoicesLS as any} />
+      <EditLoad value={currentLoad} onClose={() => setOpenLoadId(undefined)} onSave={saveLoad} ctx={ctx} invoicesLS={invoicesLS} />
     </div>
   );
 }
