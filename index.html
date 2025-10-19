@@ -2,935 +2,1170 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>DrayagePro TMS + WMS (Beta)</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>DrayagePro TMS & WMS by Hudson Insights (Beta)</title>
   <style>
-    /* Minimal Windows-y look tweaks */
-    body { background: #f3f4f6; }
-    .card { background:#fff; border:1px solid #e5e7eb; border-radius:0.5rem; }
-    .btn-base { @apply inline-flex items-center justify-center select-none transition-colors border rounded; }
+    /* ======= Minimal Windows-like look (Segoe UI, no shading) ======= */
+    :root {
+      --bg: #ffffff;
+      --fg: #1f2937;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --primary: #2563eb;
+      --danger: #dc2626;
+      --warn: #ca8a04;
+      --ok: #16a34a;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    h1 { margin: 0 0 4px 0; font-size: 20px; font-weight: 600; }
+    h2 { margin: 12px 0 8px; font-size: 18px; font-weight: 600; }
+    h3 { margin: 12px 0 8px; font-size: 16px; font-weight: 600; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .space { height: 8px; }
+    .spacer { flex: 1; }
+    .stack { display: grid; gap: 8px; }
+    .grid { display: grid; gap: 8px; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .card { border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .card-body { padding: 12px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    input[type="text"], input[type="date"], input[type="number"], input[type="password"], select, textarea {
+      width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--fg);
+    }
+    textarea { height: 80px; padding: 8px 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border-top: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
+    thead th { border-top: none; font-weight: 600; font-size: 13px; }
+    tr:nth-child(even) td { background: #fff; } /* no shading bands */
+    .right { text-align: right; }
+    .center { text-align: center; }
+    .btn {
+      height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line);
+      background: #f8fafc; cursor: pointer; color: var(--fg); font-weight: 600;
+    }
+    .btn:hover { background: #eef2ff; border-color: #c7d2fe; }
+    .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .btn.primary:hover { filter: brightness(0.95); }
+    .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+    .btn.warn { background: var(--warn); border-color: var(--warn); color: #fff; }
+    .btn.icon { width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .chip { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
+    .chip.ok { color: var(--ok); border-color: var(--ok); }
+    .chip.warn { color: var(--warn); border-color: var(--warn); }
+    .chip.bad { color: var(--danger); border-color: var(--danger); }
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+    .tab { padding: 8px 12px; cursor: pointer; border-bottom: 2px solid transparent; font-weight: 600; }
+    .tab.active { color: var(--primary); border-color: var(--primary); }
+    .muted { color: var(--muted); }
+    .hidden { display: none; }
+    .link { color: var(--primary); cursor: pointer; text-decoration: none; }
+    .link:hover { text-decoration: underline; }
+    .modal-wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .modal-mask { position: absolute; inset: 0; background: rgba(0,0,0,0.25); }
+    .modal { position: relative; width: 100%; max-width: 920px; }
+    .nowrap { white-space: nowrap; }
+    .w-100 { width: 100%; }
+    .sr { position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden; }
   </style>
 </head>
-<body class="min-h-screen text-gray-900">
-  <div id="root"></div>
+<body>
+<div id="root"></div>
 
-  <!-- React 18 UMD + Babel -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- React 18 + Babel Standalone -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <script type="text/babel">
-    const {useEffect, useMemo, useState} = React;
+<script type="text/babel">
+const { useEffect, useMemo, useState, useRef } = React;
 
-    /************ UI PRIMITIVES ************/
-    function Btn({variant="primary", size="md", className="", children, ...rest}){
-      const v = variant==="primary" ? "bg-blue-600 text-white border-blue-700 hover:bg-blue-700"
-        : variant==="danger" ? "bg-red-600 text-white border-red-700 hover:bg-red-700"
-        : variant==="outline" ? "bg-white text-gray-900 border-gray-300 hover:bg-gray-50"
-        : "bg-transparent text-gray-900 border-transparent hover:bg-gray-50";
-      const s = size==="sm" ? "h-8 px-2 text-sm" : size==="icon" ? "h-8 w-8 p-0" : "h-9 px-3";
-      return <button {...rest} className={["inline-flex items-center justify-center select-none border rounded transition-colors", v, s, className].join(" ")}>{children}</button>;
-    }
-    const Input = (p)=><input {...p} className={["h-9 px-3 border rounded w-full", p.className||""].join(" ")}/>;
-    const NumberInput = (p)=><input {...p} inputMode="decimal" className={["h-9 px-3 border rounded text-right w-full", p.className||""].join(" ")}/>;
-    const TextArea = (p)=><textarea {...p} className={["min-h-[80px] p-2 border rounded w-full", p.className||""].join(" ")}/>;
-    const Label = ({className="", ...rest})=><label {...rest} className={["block text-sm font-medium text-gray-700", className].join(" ")}/>;
-    const Card = ({className="", ...rest})=><div {...rest} className={["card", className].join(" ")}/>;
-    const CardBody = ({className="", ...rest})=><div {...rest} className={["p-4", className].join(" ")}/>;
-    const Badge = ({tone="muted", children})=>{
-      const map = { ok:"bg-green-100 text-green-800", warn:"bg-yellow-100 text-yellow-800", danger:"bg-red-100 text-red-800", muted:"bg-gray-100 text-gray-700", bad:"bg-red-100 text-red-800"};
-      return <span className={["text-xs px-2 py-0.5 rounded", map[tone]].join(" ")}>{children}</span>;
-    };
-    function Modal({open, onClose, title, children, width=920}){
-      if(!open) return null;
-      return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/30" onClick={onClose}/>
-          <Card className="relative w-full" style={{maxWidth: width}}>
-            <CardBody>
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="font-semibold">{title||""}</h4>
-                <Btn variant="outline" onClick={onClose}>Close</Btn>
-              </div>
-              {children}
-            </CardBody>
-          </Card>
-        </div>
-      );
-    }
-
-    /************ UTILS ************/
-    const isClient = ()=> typeof window!=="undefined" && !!window.localStorage;
-    const round2 = (n)=> Math.round((Number(n)||0)*100)/100;
-    const moneyStr = (n)=> round2(n||0).toFixed(2);
-    const parseMoney = (s)=>{
-      const t = String(s??"");
-      const noCommas = t.split(",").join("");
-      const quick = Number(noCommas);
-      if(!Number.isNaN(quick) && Number.isFinite(quick)) return round2(quick);
-      let out="", dot=false;
-      for(let i=0;i<noCommas.length;i++){
-        const ch=noCommas[i];
-        if((ch>="0"&&ch<="9") || (ch==="-"&&out==="") || (ch==="."&&!dot)){ out+=ch; if(ch===".") dot=true; }
-      }
-      const num = parseFloat(out||"0");
-      return round2(Number.isFinite(num)?num:0);
-    };
-    const snapMoneyBlur = (e)=>{ try{ const el=e.target; el.value = moneyStr(parseMoney(el.value)); }catch{} };
-    const todayISO = ()=> new Date().toISOString().slice(0,10);
-    const addDays = (iso, days)=>{ const d=new Date(iso||todayISO()); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); };
-    const csvCRLF = (rows)=>{
-      if(!rows?.length) return "";
-      const headers = Object.keys(rows[0]);
-      const esc = (v)=> '"' + String(v??"").split('"').join('""') + '"';
-      return [headers.join(","), ...rows.map(r=>headers.map(k=>esc(r[k])).join(","))].join("\r\n");
-    };
-
-    /************ TYPES (doc strings only) ************/
-    // credit terms
-    const CREDIT_TERMS = ["Pre-pay","Pay Upon Delivery","Net-30","Net-45","Net-60"];
-
-    /************ SEEDS ************/
-    const seedCustomers = [
-      { id:"CUST-1001", name:"Hudson Insights", creditActive:true, creditTerms:"Net-30", availableCredit:100000, totalBalance:0 }
-    ];
-    const seedCarriers = [
-      { id:"CAR-2001", name:"Windy City Drayage", mcNumber:"123456", dotNumber:"7654321" }
-    ];
-    const seedLoads = [
-      {
-        id:"LOAD-3001", ref:"PO-7781", customerId:"CUST-1001", carrierId:"CAR-2001",
-        mode:"Dray", trade:"Import",
-        origin:"CN-LBT Pier E", stop1:"UP Global 1", destination:"CIC Chicago",
-        weight:38000, commodity:"Appliances", containerSize:"40HC",
-        containerNo:"MSCU1234567", chassisNo:"CH-0091",
-        arrivalDate: todayISO(), lastFreeDay: addDays(todayISO(),4), dispatchDate: todayISO(),
-        deliveryDate: addDays(todayISO(),2), deliveryTime: "14:00",
-        status:"Active",
-        billables:[
-          { id:"B1", type:"Linehaul", description:"Linehaul", note:"", carrier:550, customer:775 },
-          { id:"B2", type:"Fuel", description:"Fuel", note:"Auto", carrier:50, customer:75 },
-        ],
-      }
-    ];
-    const seedInvoices = [
-      { id:"INV-9001", ref:"LOAD-3001", customerId:"CUST-1001", customerName:"Hudson Insights", issuedOn:todayISO(), dueOn:addDays(todayISO(),30),
-        status:"Draft", lines:[
-          { id:"L1", type:"Linehaul", description:"Load charge", amount:775 },
-          { id:"L2", type:"Fuel", description:"Surcharge", amount:75 }
-        ], taxPct:0, discount:0, total:850
-      }
-    ];
-    const seedStorage = [
-      { id:"STO-5001", customerId:"CUST-1001", warehouse:"Acme Transportation University Park - 2545 Palmer Ave, University Park, IL 60484",
-        units:10, unitDesc:"Pallets", hazmat:false, hazmatClass:"", costPerDay:12.5, weight:15000, insuredValue:50000,
-        commodity:"Metal parts", startDate: todayISO(), value:50000 }
-    ];
-
-    /************ localStorage HOOK ************/
-    function useLocalStorage(key, seed){
-      const [value,setValue] = useState(()=>{
-        if(!isClient()) return seed;
-        try{ const raw = localStorage.getItem(key); return raw? JSON.parse(raw): seed; }catch{ return seed; }
-      });
-      useEffect(()=>{ if(isClient()) try{ localStorage.setItem(key, JSON.stringify(value)); }catch{} }, [key,value]);
-      const save = (next)=>{ setValue(next); if(isClient()) try{ localStorage.setItem(key, JSON.stringify(next)); }catch{} };
-      return {value, save};
-    }
-
-    /************ DOMAIN HELPERS ************/
-    const BILLABLE_TYPES = ["Linehaul","Fuel","Detention","Accessorial","Lumper","Chassis","Stopoff","Storage","Waiting","Other"];
-    const cname = (customers, id)=> (customers.find(c=>c.id===id)||{}).name || "—";
-    const carname = (carriers, id)=> (carriers.find(c=>c.id===id)||{}).name || "—";
-    const getBillables = (s)=> Array.isArray(s?.billables)? s.billables: [];
-    const computeTotals = (s)=>{
-      const bs = getBillables(s);
-      return { cust: round2(bs.reduce((a,b)=> a + (Number(b.customer)||0), 0)), carr: round2(bs.reduce((a,b)=> a + (Number(b.carrier)||0), 0)) };
-    };
-    const margin = (cust, carr)=> round2((cust||0)-(carr||0));
-    const marginPct = (cust, carr)=> cust>0 ? round2(((cust - (carr||0))/cust)*100) : 0;
-    const dueFromTerms = (issuedOn, terms)=> terms==="Net-30"?addDays(issuedOn,30):terms==="Net-45"?addDays(issuedOn,45):terms==="Net-60"?addDays(issuedOn,60):issuedOn;
-    const ageDays = (date)=> Math.floor((new Date().getTime() - new Date(date).getTime())/86400000);
-
-    function buildInvoiceFromLoad(load, customers){
-      const bs = getBillables(load);
-      const lines = bs.length? bs.map((b,i)=>({
-        id:"L"+(Math.floor(Math.random()*9000)+1000)+"-"+(i+1),
-        type:b.type, description:b.description||("Load "+load.id), note:b.note||"Auto-from load", amount: round2(Number(b.customer||0))
-      })) : [{ id:"L"+(Math.floor(Math.random()*9000)+1000), type:"Linehaul", description:"Load "+load.id, note:"Auto-created", amount:0 }];
-      const sub = round2(lines.reduce((t,l)=> t + (l.amount||0), 0));
-      const cust = customers.find(c=>c.id===load.customerId);
-      const issued = todayISO();
-      return { id:"INV-"+(Math.floor(Math.random()*900000)+100000), ref:load.id, customerId:load.customerId,
-        customerName:cust?.name||"—", issuedOn:issued, dueOn:dueFromTerms(issued, cust?.creditTerms||"Net-30"),
-        status:"Draft", lines, taxPct:0, discount:0, total:sub };
-    }
-
-    function openPrintHTML(title, bodyParts){
-      try{
-        const w = window.open("about:blank","_blank"); if(!w) return;
-        const out = ["<!doctype html><title>"+title+"</title><body style='font-family:Arial'>", ...bodyParts, "</body>"];
-        w.document.write(out.join("")); w.document.close(); w.focus(); w.print();
-      }catch{}
-    }
-    function printBOL(load){
-      const parts=[];
-      parts.push("<h2>Bill of Lading</h2>");
-      parts.push("<div>Load: "+(load.id||"")+"</div>");
-      if(load.ref) parts.push("<div>Ref: "+load.ref+"</div>");
-      parts.push("<div>Customer: "+(load.customer||"")+"</div>");
-      parts.push("<div>Carrier: "+(load.carrier||"")+"</div>");
-      parts.push("<div>Origin: "+(load.origin||"")+"</div>");
-      parts.push("<div>Stop #1: "+(load.stop1||"")+"</div>");
-      parts.push("<div>Destination/Return Location: "+(load.destination||"")+"</div>");
-      if(load.weight) parts.push("<div>Weight: "+load.weight+" lb</div>");
-      if(load.commodity) parts.push("<div>Commodity: "+load.commodity+"</div>");
-      if(load.containerSize) parts.push("<div>Container Size: "+load.containerSize+"</div>");
-      if(load.containerNo) parts.push("<div>Container #: "+load.containerNo+"</div>");
-      if(load.chassisNo) parts.push("<div>Chassis #: "+load.chassisNo+"</div>");
-      parts.push("<hr/><div style='margin-top:16px;color:#999;transform:rotate(-6deg)'>Created in DrayagePro TMS by Hudson Insights</div>");
-      openPrintHTML(String(load.id||"BOL"), parts);
-    }
-    function printInvoicePDF(inv){
-      const sub = (inv.lines||[]).reduce((s,l)=> s+(Number(l.amount)||0), 0);
-      const tax = round2(((inv.taxPct||0)/100)*sub);
-      const total = round2(sub + tax - (inv.discount||0));
-      const rows = (inv.lines||[]).map(l=>"<tr><td>"+l.type+"</td><td>"+(l.description||"")+"</td><td>"+(l.note||"")+"</td><td>$"+(l.amount||0).toFixed(2)+"</td></tr>").join("");
-      const parts=[];
-      parts.push("<h2>Invoice "+inv.id+"</h2>");
-      parts.push("<div>Customer: "+inv.customerName+"</div>");
-      if(inv.ref) parts.push("<div>Ref: "+inv.ref+"</div>");
-      parts.push("<table border=1 cellspacing=0 cellpadding=4 style='margin-top:8px;font-family:Arial;font-size:12px'><thead><tr><th>Type</th><th>Description</th><th>Note</th><th>Amount</th></tr></thead><tbody>"+rows+"</tbody></table>");
-      parts.push("<div>Tax ("+(inv.taxPct||0)+"%): $"+tax.toFixed(2)+"</div>");
-      parts.push("<div>Discount: -$"+(inv.discount||0).toFixed(2)+"</div>");
-      parts.push("<h3>Total: $"+total.toFixed(2)+"</h3>");
-      openPrintHTML(inv.id, parts);
-    }
-
-    /************ APP PAGES ************/
-    function LoadBoard({ctx, loadsLS, invoicesLS, onOpen}){
-      const [q,setQ] = useState("");
-      const filtered = useMemo(()=> (loadsLS.value||[]).filter(s=>
-        [s.id, s.ref, s.origin, s.destination, carname(ctx.carriers, s.carrierId)].some(x=> (x||"").toLowerCase().includes(q.toLowerCase()))
-      ), [loadsLS.value, q, ctx.carriers]);
-      const csv = ()=>{
-        const rows = filtered.map(s=>({
-          id:s.id, ref:s.ref||"", origin:s.origin, stop1:s.stop1, destination:s.destination,
-          carrier: carname(ctx.carriers, s.carrierId), weight: s.weight||"", commodity:s.commodity||"", containerSize:s.containerSize||"",
-          arrivalDate:s.arrivalDate||"", lastFreeDay:s.lastFreeDay||"", dispatchDate:s.dispatchDate||"", deliveryDate:s.deliveryDate||"", deliveryTime:s.deliveryTime||""
-        }));
-        const data = csvCRLF(rows);
-        const url = URL.createObjectURL(new Blob([data], {type:"text/csv;charset=utf-8;"}));
-        const a = document.createElement("a"); a.href=url; a.download="load-board.csv"; a.click(); URL.revokeObjectURL(url);
-      };
-      const newLoad = ()=>{
-        const s = {
-          id:"LOAD-"+(Math.floor(Math.random()*9000)+1000),
-          ref:"",
-          customerId: ctx.customers[0]?.id || "",
-          carrierId: ctx.carriers[0]?.id,
-          mode:"Dray", trade:"Import",
-          origin:"", stop1:"", destination:"",
-          weight: undefined, commodity:"", containerSize:"",
-          containerNo:"", chassisNo:"",
-          arrivalDate: todayISO(), lastFreeDay:"", dispatchDate:"", deliveryDate:"", deliveryTime:"",
-          status:"Active",
-          billables:[{ id:"B"+(Math.floor(Math.random()*9000)+1000), type:"Linehaul", description:"Linehaul", note:"", carrier:0, customer:0 }]
-        };
-        const nextLoads = [s, ...(loadsLS.value||[])];
-        loadsLS.save(nextLoads);
-        const inv = buildInvoiceFromLoad(s, ctx.customers);
-        invoicesLS.save([inv, ...(invoicesLS.value||[])]);
-        const sub = computeTotals(s).cust;
-        ctx.setCustomers((ctx.customers||[]).map(c=> c.id===s.customerId? {...c, availableCredit: round2((c.availableCredit||0) - sub)} : c));
-        onOpen(s.id);
-      };
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Load Board</h3>
-            <div className="flex items-center gap-2">
-              <Input placeholder="Search…" value={q} onChange={e=>setQ(e.target.value)} className="w-56"/>
-              <Btn variant="outline" onClick={csv}>Export CSV</Btn>
-              <Btn onClick={newLoad}>+ New Load</Btn>
-            </div>
+/** ================== Small UI helpers ================== */
+const Btn = ({ className="", variant="", ...props }) => (
+  <button {...props} className={["btn", variant, className].filter(Boolean).join(" ")} />
+);
+const Card = ({ className="", ...props }) => <div {...props} className={["card", className].join(" ")} />;
+const CardBody = ({ className="", ...props }) => <div {...props} className={["card-body", className].join(" ")} />;
+const Badge = ({ tone="muted", children }) => <span className={["chip", tone].join(" ")}>{children}</span>;
+const Field = ({ label, children }) => (
+  <div>
+    <label>{label}</label>
+    {children}
+  </div>
+);
+const Input = (p) => <input type="text" {...p} />;
+const NumInput = (p) => <input type="text" inputMode="decimal" {...p} />;
+const TextArea = (p) => <textarea {...p} />;
+const Modal = ({ open, onClose, title, children, width=920 }) => {
+  if(!open) return null;
+  return (
+    <div className="modal-wrap" role="dialog" aria-modal="true">
+      <div className="modal-mask" onClick={onClose}></div>
+      <Card className="modal" style={{maxWidth: width}}>
+        <CardBody>
+          <div className="row" style={{justifyContent:"space-between"}}>
+            <h2>{title || ""}</h2>
+            <Btn className="btn" onClick={onClose}>Close</Btn>
           </div>
-          <Card>
-            <CardBody className="p-0 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="p-2 text-left">Load #</th>
-                    <th className="p-2 text-left">Origin</th>
-                    <th className="p-2 text-left">Stop #1</th>
-                    <th className="p-2 text-left">Destination/Return Location</th>
-                    <th className="p-2 text-left">Carrier</th>
-                    <th className="p-2 text-left">Weight</th>
-                    <th className="p-2 text-left">Commodity</th>
-                    <th className="p-2 text-left">Container Size</th>
-                    <th className="p-2 text-left">Arrival</th>
-                    <th className="p-2 text-left">Last Free Day</th>
-                    <th className="p-2 text-left">Dispatch</th>
-                    <th className="p-2 text-left">Delivery</th>
-                    <th className="p-2 text-left">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length? filtered.map(s=>(
-                    <tr key={s.id} className="odd:bg-white even:bg-gray-50">
-                      <td className="p-2"><button className="text-blue-600 underline" onClick={()=>onOpen(s.id)}>{s.id}</button></td>
-                      <td className="p-2">{s.origin||"—"}</td>
-                      <td className="p-2">{s.stop1||"—"}</td>
-                      <td className="p-2">{s.destination||"—"}</td>
-                      <td className="p-2">{carname(ctx.carriers, s.carrierId)}</td>
-                      <td className="p-2">{s.weight? (s.weight+" lb") : "—"}</td>
-                      <td className="p-2">{s.commodity||"—"}</td>
-                      <td className="p-2">{s.containerSize||"—"}</td>
-                      <td className="p-2">{s.arrivalDate||"—"}</td>
-                      <td className="p-2">{s.lastFreeDay||"—"}</td>
-                      <td className="p-2">{s.dispatchDate||"—"}</td>
-                      <td className="p-2">{s.deliveryDate||"—"}</td>
-                      <td className="p-2">{s.deliveryTime||"—"}</td>
-                    </tr>
-                  )) : (
-                    <tr><td className="p-6 text-center text-gray-500" colSpan={13}>No loads.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </CardBody>
-          </Card>
-        </div>
-      );
-    }
+          {children}
+        </CardBody>
+      </Card>
+    </div>
+  );
+};
 
-    function EditLoad({ctx, value, onClose, onSave, invoicesLS}){
-      const [form, setForm] = useState(value);
-      useEffect(()=>{ if(value) setForm({...value, billables: getBillables(value)}); }, [value]);
-      if(!form) return null;
-      const u = (k,v)=> setForm({...form, [k]: v});
-      const moneyCell = (val, on)=> <NumberInput defaultValue={moneyStr(val)} onBlur={snapMoneyBlur} onChange={e=>on(parseMoney(e.target.value))}/>;
-      const addLine = (type)=> setForm({...form, billables:[...getBillables(form), {id:"B"+(Math.floor(Math.random()*9000)+1000), type:type||"Linehaul", description:type||"Linehaul", note:"", carrier:0, customer:0}]});
-      const delLine = (id)=> setForm({...form, billables:getBillables(form).filter(b=>b.id!==id)});
-      const totals = computeTotals(form);
-      const syncInvoiceDraft = ()=>{
-        const list = [...(invoicesLS.value||[])];
-        const i = list.findIndex(x=>x.ref===form.id);
-        if(i<0) return;
-        const inv = list[i];
-        if(inv.status!=="Draft") return;
-        const lines = getBillables(form).map((b,idx)=>({
-          id: inv.lines[idx]?.id || "L"+(Math.floor(Math.random()*9000)+1000)+"-"+(idx+1),
-          type:b.type, description:b.description||("Load "+form.id), note:b.note||"Auto-from load", amount: round2(Number(b.customer||0))
-        }));
-        const total = round2(lines.reduce((t,l)=> t + (l.amount||0), 0));
-        list[i] = {...inv, customerId: form.customerId, customerName: cname(ctx.customers, form.customerId), lines, total};
-        invoicesLS.save(list);
-      };
-      const save = ()=>{ onSave(form); syncInvoiceDraft(); onClose(); };
-      return (
-        <Modal open={!!value} onClose={onClose} title={"Load Detail • "+form.id}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <Label>Customer</Label>
-              <select className="h-9 border rounded px-2 w-full" value={form.customerId} onChange={e=>u("customerId", e.target.value)}>
-                {ctx.customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <Label>Carrier</Label>
-              <select className="h-9 border rounded px-2 w-full" value={form.carrierId||""} onChange={e=>u("carrierId", e.target.value||undefined)}>
-                <option value="">—</option>
-                {ctx.carriers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <Label>Mode</Label>
-              <select className="h-9 border rounded px-2 w-full" value={form.mode} onChange={e=>u("mode", e.target.value)}>
-                <option>Dray</option><option>TL</option><option>LTL</option><option>Parcel</option>
-              </select>
-            </div>
-            {form.mode==="Dray" ? (
-              <div>
-                <Label>Import/Export</Label>
-                <select className="h-9 border rounded px-2 w-full" value={form.trade||"Import"} onChange={e=>u("trade", e.target.value)}>
-                  <option>Import</option><option>Export</option>
-                </select>
-              </div>
-            ):null}
-            <div><Label>Origin</Label><Input value={form.origin||""} onChange={e=>u("origin", e.target.value)}/></div>
-            <div><Label>Stop #1</Label><Input value={form.stop1||""} onChange={e=>u("stop1", e.target.value)}/></div>
-            <div><Label>Destination/Return Location</Label><Input value={form.destination||""} onChange={e=>u("destination", e.target.value)}/></div>
-            <div><Label>Weight (lb)</Label><NumberInput defaultValue={form.weight?String(form.weight):""} onBlur={snapMoneyBlur} onChange={e=>u("weight", parseMoney(e.target.value))}/></div>
-            <div><Label>Commodity</Label><Input value={form.commodity||""} onChange={e=>u("commodity", e.target.value)}/></div>
-            <div><Label>Container Size</Label><Input value={form.containerSize||""} onChange={e=>u("containerSize", e.target.value)}/></div>
-            <div><Label>Container #</Label><Input value={form.containerNo||""} onChange={e=>u("containerNo", e.target.value)}/></div>
-            <div><Label>Chassis #</Label><Input value={form.chassisNo||""} onChange={e=>u("chassisNo", e.target.value)}/></div>
-            <div><Label>Arrival</Label><Input type="date" value={form.arrivalDate||""} onChange={e=>u("arrivalDate", e.target.value)}/></div>
-            <div><Label>Last Free Day</Label><Input type="date" value={form.lastFreeDay||""} onChange={e=>u("lastFreeDay", e.target.value)}/></div>
-            <div><Label>Dispatch</Label><Input type="date" value={form.dispatchDate||""} onChange={e=>u("dispatchDate", e.target.value)}/></div>
-            <div><Label>Delivery Date</Label><Input type="date" value={form.deliveryDate||""} onChange={e=>u("deliveryDate", e.target.value)}/></div>
-            <div><Label>Delivery Time</Label><Input type="time" value={form.deliveryTime||""} onChange={e=>u("deliveryTime", e.target.value)}/></div>
-            <div><Label>Status</Label><Input value={form.status||"Active"} onChange={e=>u("status", e.target.value)}/></div>
+/** ================== Utils & LS ================== */
+const isClient = () => typeof window !== "undefined" && !!window.localStorage;
+const round2 = (n) => Math.round((Number(n)||0)*100)/100;
+const money = (n) => round2(n||0).toFixed(2);
+const parseMoney = (v) => {
+  const s = String(v ?? "").split(",").join("");
+  const m = s.match(/-?\d*(?:\.\d+)?/);
+  const num = m && m[0] !== "" ? Number(m[0]) : 0;
+  return round2(num);
+};
+const snapMoneyBlur = (e) => {
+  try{ const el=e.target; el.value = money(parseMoney(el.value)); }catch{}
+};
+const today = () => new Date().toISOString().slice(0,10);
+const daysBetween = (d1, d2) => {
+  try {
+    const a = new Date(d1); const b = new Date(d2);
+    const ms = b.getTime() - a.getTime();
+    return Math.floor(ms/86400000);
+  } catch { return 0; }
+};
 
-            <div className="md:col-span-3 p-2 bg-gray-50 rounded">
-              <div className="flex flex-wrap items-center gap-3 text-sm">
-                <div><b>Carrier Name:</b> {ctx.carriers.find(c=>c.id===form.carrierId)?.name || "—"}</div>
-                <div><b>Carrier MC#:</b> {ctx.carriers.find(c=>c.id===form.carrierId)?.mcNumber || "—"}</div>
-                <div><b>Carrier DOT#:</b> {ctx.carriers.find(c=>c.id===form.carrierId)?.dotNumber || "—"}</div>
-              </div>
-            </div>
+function useLocalStorage(key, seed){
+  const [value,setValue] = useState(()=>{
+    if(!isClient()) return seed;
+    try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : seed; }catch{ return seed; }
+  });
+  useEffect(()=>{
+    if(!isClient()) return;
+    try{ localStorage.setItem(key, JSON.stringify(value)); }catch{}
+  }, [key, value]);
+  return { value, setValue };
+}
+
+function uuid(prefix="ID-"){
+  return prefix + Math.floor(Math.random()*900000+100000);
+}
+
+/** ================== Types (JSDoc) ================== */
+/**
+ * @typedef {{ id:string, name:string, mc?:string, dot?:string, bondUrl?:string,
+ *   autoProvider?:string, autoPolicy?:string, autoExp?:string,
+ *   cargoProvider?:string, cargoPolicy?:string, cargoExp?:string, flagged?:boolean,
+ *   arName?:string, arEmail?:string, arPhone?:string, arAddress?:string }} Carrier
+ */
+/**
+ * @typedef {{ id:string, name:string, creditActive?:boolean, availableCredit:number, totalBalance:number, terms:"Pre-pay"|"Pay Upon Delivery"|"Net-30"|"Net-45"|"Net-60",
+ *   apName?:string, apPhone?:string, apEmail?:string, apAddress?:string,
+ *   opsName?:string, opsPhone?:string, opsEmail?:string, opsAddress?:string,
+ *   prefInvoiceMail?:boolean, prefInvoiceEmail?:boolean, prefInvoiceFax?:boolean,
+ *   creditAppUrl?:string, billingInstrUrl?:string }} Customer
+ */
+/**
+ * @typedef {{ id:string, type:string, description?:string, note?:string, carrier?:number, customer?:number }} Billable
+ */
+/**
+ * @typedef {{ id:string, ref?:string, customerId:string, carrierId?:string, mode:"Dray"|"TL"|"LTL"|"Parcel",
+ *   trade?: "Import"|"Export", origin?:string, stop1?:string, destination?:string,
+ *   pickup?:string, arrival?:string, lastFree?:string, dispatch?:string, delivery?:string, deliveryTime?:string,
+ *   equipment?:string, containerNo?:string, trailerNo?:string,
+ *   hazmat?:boolean, hazmatClass?:string, tankerEndorsed?:boolean, weight?:number, shipmentValue?:number,
+ *   billables:Billable[], status:"Active"|"Tendered"|"Dispatched"|"Picked-up"|"Delivered"|"Returned Empty"|"Invoiced"
+ * }} Load
+ */
+/**
+ * @typedef {{ id:string, type:string, description?:string, note?:string, amount:number }} InvoiceLine
+ */
+/**
+ * @typedef {{ id:string, ref?:string, customer:string, status:"Draft"|"Sent"|"Paid"|"Void",
+ *   invoiceDate?:string, lines:InvoiceLine[], taxPct:number, discount:number, total:number, agingDays:number }} Invoice
+ */
+/**
+ * @typedef {{ id:string, customerId:string, warehouse:string, units:number, unitDesc?:string, unitWeight?:number, dailyRate:number,
+ *   hazmat?:boolean, hazmatClass?:string, insuredValue?:number, estDays:number, valueTotal?:number, note?:string }} StorageOrder
+ */
+/**
+ * @typedef {{ username:string, password:string, role:"Admin"|"Broker" }} User
+ */
+
+/** ================== Seeds ================== */
+const seedCustomers = /** @type {Customer[]} */ ([
+  { id:"CUST-1001", name:"Hudson Insights", availableCredit:50000, totalBalance:0, terms:"Net-30",
+    apName:"", apPhone:"", apEmail:"", apAddress:"", opsName:"", opsPhone:"", opsEmail:"", opsAddress:"",
+    prefInvoiceMail:false, prefInvoiceEmail:true, prefInvoiceFax:false }
+]);
+const seedCarriers = /** @type {Carrier[]} */ ([
+  { id:"CAR-2001", name:"Windy City Drayage", mc:"123456", dot:"7654321" }
+]);
+const seedLoads = /** @type {Load[]} */ ([
+  {
+    id:"LOAD-3001", ref:"PO-7781", customerId:"CUST-1001", carrierId:"CAR-2001", mode:"Dray", trade:"Import",
+    origin:"CN-LBT Pier E", stop1:"UP Global 1", destination:"CIC Chicago",
+    pickup: today(), arrival: today(), lastFree: today(), dispatch: today(), delivery: today(), deliveryTime:"14:00",
+    status:"Active", equipment:"Container", containerNo:"MSCU1234567", trailerNo:"CH-0091",
+    hazmat:false, hazmatClass:"", tankerEndorsed:false, weight:38000, shipmentValue: 125000,
+    billables:[
+      { id:"B1", type:"Linehaul", description:"Linehaul", carrier:550, customer:775 },
+      { id:"B2", type:"Fuel", description:"Fuel", carrier:50, customer:75 }
+    ]
+  }
+]);
+const seedInvoices = /** @type {Invoice[]} */ ([
+  { id:"INV-9001", ref:"LOAD-3001", customer:"Hudson Insights", status:"Draft", invoiceDate:today(),
+    lines:[
+      { id:"L1", type:"Linehaul", description:"Load charge", note:"Auto-created", amount:775 },
+      { id:"L2", type:"Fuel", description:"Surcharge", note:"Auto-created", amount:75 }
+    ],
+    taxPct:0, discount:0, total:850, agingDays:0
+  }
+]);
+const seedStorage = /** @type {StorageOrder[]} */ ([
+  { id:"STO-5001", customerId:"CUST-1001", warehouse:"Acme Transportation University Park - 2545 Palmer Ave, University Park, IL 60484",
+    units:10, unitDesc:"Pallets", unitWeight:12000, dailyRate:8, hazmat:false, hazmatClass:"", insuredValue: 25000, estDays: 10, valueTotal: 25000, note:"" }
+]);
+const seedUsers = /** @type {User[]} */ ([
+  { username:"g.desgrosseilliers", password:"Lincoln082024", role:"Admin" },
+  { username:"broker", password:"demo", role:"Broker" }
+]);
+
+/** ================== Derivations & helpers ================== */
+const BILLABLE_TYPES = ["Linehaul","Fuel","Detention","Accessorial","Lumper","Chassis","Stopoff","Storage","Waiting","Other"];
+const LOAD_STATUSES = ["Active","Tendered","Dispatched","Picked-up","Delivered","Returned Empty","Invoiced"];
+
+function sum(xs){ return xs.reduce((a,b)=>a+(Number(b)||0),0); }
+function calcLoadTotals(load){
+  const cust = sum((load.billables||[]).map(b=>b.customer||0));
+  const carr = sum((load.billables||[]).map(b=>b.carrier||0));
+  const margin = round2(cust - carr);
+  const marginPct = (cust>0) ? round2((margin / cust) * 100) : 0;
+  return { cust, carr, margin, marginPct };
+}
+function builInvoiceLinesFromLoad(load){
+  const lines = (load.billables&&load.billables.length)
+    ? load.billables.map((b,i)=>({ id: b.id || uuid("L-")+i, type: b.type||"Charge",
+        description: b.description || `Load ${load.id}${load.ref? " • "+load.ref:""}`,
+        note: b.note || "Auto-created from load billables", amount: round2(b.customer||0) }))
+    : [{ id: uuid("L-"), type:"Linehaul", description:`Load ${load.id}${load.ref? " • "+load.ref:""}`, note:"Auto", amount:0 }];
+  return lines;
+}
+
+function openPrintHTML(title, parts){
+  try{
+    const w = window.open("about:blank","_blank");
+    if(!w) return;
+    w.document.write(`<!doctype html><title>${title}</title><body style="font-family:Segoe UI, Arial, sans-serif">`+parts.join("")+`</body>`);
+    w.document.close();
+    w.focus();
+    w.print();
+  }catch{}
+}
+function printBOL(load, customerName, carrierName){
+  const parts = [];
+  parts.push(`<h2>Bill of Lading</h2>`);
+  parts.push(`<div>Load: ${load.id||""}</div>`);
+  if(load.ref) parts.push(`<div>Ref: ${load.ref}</div>`);
+  parts.push(`<div>Customer: ${customerName||""}</div>`);
+  parts.push(`<div>Carrier: ${carrierName||""}</div>`);
+  parts.push(`<div>Origin: ${load.origin||""}</div>`);
+  parts.push(`<div>Stop #1: ${load.stop1||""}</div>`);
+  parts.push(`<div>Destination/Return Location: ${load.destination||""}</div>`);
+  parts.push(`<div>Pickup: ${load.pickup||""}</div>`);
+  if(load.delivery) parts.push(`<div>Delivery: ${load.delivery} ${load.deliveryTime||""}</div>`);
+  parts.push(`<div>Equipment: ${load.equipment||""}</div>`);
+  if(load.containerNo) parts.push(`<div>Container #: ${load.containerNo}</div>`);
+  if(load.trailerNo) parts.push(`<div>Chassis/Trailer #: ${load.trailerNo}</div>`);
+  parts.push(`<hr/><div style="margin-top:16px;color:#888;transform:rotate(-6deg)">Created in DrayagePro TMS by Hudson Insights</div>`);
+  openPrintHTML(load.id||"BOL", parts);
+}
+function printInvoicePDF(inv, setInvoiceDate){
+  const sub = sum((inv.lines||[]).map(l=>l.amount||0));
+  const tax = round2(((inv.taxPct||0)/100)*sub);
+  const total = round2(sub + tax - (inv.discount||0));
+  const rows = (inv.lines||[]).map(l=>`<tr><td>${l.type||""}</td><td>${l.description||""}</td><td>${l.note||""}</td><td>$${money(l.amount||0)}</td></tr>`).join("");
+  const parts = [];
+  parts.push(`<h2>Invoice ${inv.id}</h2>`);
+  parts.push(`<div>Customer: ${inv.customer||""}</div>`);
+  if(inv.ref) parts.push(`<div>Ref: ${inv.ref}</div>`);
+  parts.push(`<table border="1" cellspacing="0" cellpadding="4" style="margin-top:8px;font-family:Segoe UI, Arial;font-size:12px"><thead><tr><th>Type</th><th>Description</th><th>Note</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>`);
+  parts.push(`<div>Tax (${inv.taxPct||0}%): $${money(tax)}</div>`);
+  parts.push(`<div>Discount: -$${money(inv.discount||0)}</div>`);
+  parts.push(`<h3>Total: $${money(total)}</h3>`);
+  // stamp invoice date if not set
+  if(!inv.invoiceDate && typeof setInvoiceDate === "function"){ setInvoiceDate(today()); }
+  openPrintHTML(inv.id, parts);
+}
+
+/** ================== Auth ================== */
+function useAuth(){
+  const usersLS = useLocalStorage("dp_users", seedUsers);
+  const [session, setSession] = useState(()=> isClient()? localStorage.getItem("dp_session"): null);
+  const current = usersLS.value.find(u=>u.username === session) || null;
+  const login = (u,p)=>{
+    const f = usersLS.value.find(x => x.username.toLowerCase()===String(u).toLowerCase());
+    if(f && f.password===p){ localStorage.setItem("dp_session", f.username); setSession(f.username); return {ok:true}; }
+    return {ok:false};
+  };
+  const logout = ()=>{ localStorage.removeItem("dp_session"); setSession(null); };
+  const resetUsers = ()=> usersLS.setValue(seedUsers);
+  return { users: usersLS.value, setUsers: usersLS.setValue, current, login, logout, resetUsers };
+}
+
+const LoginView = ({ onSuccess }) => {
+  const { login, resetUsers } = useAuth();
+  const [u,setU] = useState(""); const [p,setP] = useState(""); const [busy,setBusy] = useState(false); const [msg,setMsg] = useState("");
+  const submit = ()=>{
+    if(busy) return; setBusy(true);
+    const r = login(u,p);
+    if(r.ok){ onSuccess(); } else { setMsg("Invalid credentials"); setBusy(false); }
+  };
+  return (
+    <div className="container" style={{minHeight:"60vh", display:"flex", alignItems:"center", justifyContent:"center"}}>
+      <Card style={{maxWidth:380, width:"100%"}}>
+        <CardBody className="stack">
+          <h1>DrayagePro TMS & WMS — Login</h1>
+          <Field label="Username"><Input value={u} onChange={(e)=>setU(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&submit()} placeholder="username"/></Field>
+          <Field label="Password"><input type="password" value={p} onChange={(e)=>setP(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&submit()} placeholder="password" /></Field>
+          {msg? <div className="muted" style={{color:"var(--danger)"}}>{msg}</div>: null}
+          <Btn className="w-100 primary" onClick={submit} disabled={busy}>{busy? "Signing in..." : "Sign In"}</Btn>
+          <div className="row" style={{justifyContent:"space-between"}}>
+            <div className="muted" style={{fontSize:12}}>Demo: <code>g.desgrosseilliers / Lincoln082024</code></div>
+            <Btn className="" onClick={resetUsers}>Reset users</Btn>
           </div>
+        </CardBody>
+      </Card>
+    </div>
+  );
+};
 
-          <div className="mt-4">
-            <div className="flex items-center justify-between">
-              <Label className="!mb-0">Billables</Label>
-              <div className="flex items-center gap-2">
-                <select className="h-9 border rounded px-2" defaultValue="" onChange={e=>{ if(e.target.value){ addLine(e.target.value); e.target.value=""; } }}>
-                  <option value="">Quick add…</option>
-                  {BILLABLE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
-                </select>
-                <Btn variant="outline" onClick={()=>addLine("Linehaul")}>+ Line</Btn>
-              </div>
-            </div>
-            <table className="w-full text-sm mt-2">
-              <thead className="bg-gray-50"><tr>
-                <th className="p-2 text-left">Type</th>
-                <th className="p-2 text-left">Description</th>
-                <th className="p-2 text-left">Note</th>
-                <th className="p-2 text-right">Carrier $</th>
-                <th className="p-2 text-right">Customer $</th>
-                <th className="p-2 text-right">Actions</th>
-              </tr></thead>
-              <tbody>
-                {getBillables(form).map((b,i)=>(
-                  <tr key={b.id} className="odd:bg-white even:bg-gray-50">
-                    <td className="p-2">
-                      <select className="h-9 border rounded px-2" value={b.type} onChange={e=>{ const copy=[...form.billables]; copy[i]={...b, type:e.target.value}; u("billables", copy); }}>
-                        {BILLABLE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
-                      </select>
+/** ================== Data stores ================== */
+const StoreContext = React.createContext(null);
+function useStores(){
+  return React.useContext(StoreContext);
+}
+function Providers({children}){
+  const customers = useLocalStorage("dp_customers", seedCustomers);
+  const carriers = useLocalStorage("dp_carriers", seedCarriers);
+  const loads = useLocalStorage("dp_loads", seedLoads);
+  const invoices = useLocalStorage("dp_invoices", seedInvoices);
+  const storageOrders = useLocalStorage("dp_storage", seedStorage);
+  return <StoreContext.Provider value={{customers, carriers, loads, invoices, storageOrders}}>{children}</StoreContext.Provider>;
+}
+
+/** ================== Credit engine ================== */
+function adjustCustomerCredit(customersState, customerId, delta){
+  // delta positive = increase available credit; negative = debit hold
+  const list = [...customersState.value];
+  const idx = list.findIndex(c=>c.id===customerId);
+  if(idx<0) return;
+  const c = {...list[idx]};
+  const next = round2((c.availableCredit||0) + delta);
+  c.availableCredit = next < 0 ? next : next; // allow negative for Admin overrides
+  list[idx] = c;
+  customersState.setValue(list);
+}
+
+/** ================== Tabs & Shell ================== */
+const Tabs = ({tab, setTab}) => (
+  <div className="tabs">
+    {["board","carriers","customers","billing","wms"].map(t =>
+      <div key={t} className={["tab", tab===t?"active":""].join(" ")} onClick={()=>setTab(t)}>
+        {t==="board"?"Load Board": t.toUpperCase()}
+      </div>)}
+  </div>
+);
+
+function AppShell(){
+  const { current, logout } = useAuth();
+  const [tab, setTab] = useState("board");
+  const [detailLoadId, setDetailLoadId] = useState(null);
+  if(!current) return <LoginView onSuccess={()=>setTab("board")} />;
+  return (
+    <div className="container">
+      <div className="row" style={{justifyContent:"space-between"}}>
+        <h1>DrayagePro TMS & WMS by Hudson Insights</h1>
+        <div className="row">
+          <span className="muted">Signed in as <b>{current.username}</b> ({current.role})</span>
+          <Btn style={{marginLeft:8}} onClick={logout}>Logout</Btn>
+        </div>
+      </div>
+      <Tabs tab={tab} setTab={(t)=>{ setDetailLoadId(null); setTab(t); }} />
+      {tab==="board" && <LoadBoard onOpen={(id)=>{ setDetailLoadId(id); window.scrollTo(0,0); }}/>
+      }
+      {tab==="board" && detailLoadId && <LoadDetail id={detailLoadId} onClose={()=>setDetailLoadId(null)} />}
+      {tab==="carriers" && <CarriersView />}
+      {tab==="customers" && <CustomersView />}
+      {tab==="billing" && <BillingView />}
+      {tab==="wms" && <WMSView />}
+    </div>
+  );
+}
+
+/** ================== Load Board & Detail ================== */
+function useNames(){
+  const { customers, carriers } = useStores();
+  const cname = (id)=> (customers.value.find(c=>c.id===id)||{}).name || "—";
+  const carname = (id)=> (carriers.value.find(c=>c.id===id)||{}).name || "—";
+  return { cname, carname };
+}
+function LoadBoard({onOpen}){
+  const { loads, customers, carriers, invoices } = useStores();
+  const { current } = useAuth();
+  const { cname, carname } = useNames();
+  const [q,setQ] = useState("");
+  const [status,setStatus] = useState("all");
+  const [mode,setMode] = useState("all");
+
+  const filtered = useMemo(()=> (loads.value||[]).filter(s =>
+    (status==="all" || s.status===status) &&
+    (mode==="all" || s.mode===mode) &&
+    [s.id, s.ref, s.origin, s.destination, s.containerNo, s.trailerNo].some(x => String(x||"").toLowerCase().includes(q.toLowerCase()))
+  ), [loads.value, q, status, mode]);
+
+  const addNew = ()=>{
+    const s = /** @type {Load} */ ({
+      id: uuid("LOAD-"),
+      ref: "",
+      customerId: customers.value[0]?.id || "",
+      carrierId: carriers.value[0]?.id || "",
+      mode: "Dray", trade: "Import",
+      origin:"", stop1:"", destination:"",
+      pickup: today(), arrival: "", lastFree:"", dispatch:"", delivery:"", deliveryTime:"",
+      status:"Active", equipment:"Container", containerNo:"", trailerNo:"",
+      hazmat:false, hazmatClass:"", tankerEndorsed:false, weight:0, shipmentValue:0,
+      billables:[{ id:uuid("B-"), type:"Linehaul", description:"Linehaul", carrier:0, customer:0 }]
+    });
+    // Credit hold check (brokers blocked)
+    const cust = customers.value.find(c=>c.id===s.customerId);
+    const estimate = sum(s.billables.map(b=>b.customer||0));
+    if(current.role!=="Admin" && cust && (cust.availableCredit - estimate) < 0){
+      alert("Insufficient available credit. Ask an Admin to approve or adjust credit.");
+      return;
+    }
+    // Save & debit
+    loads.setValue([s, ...loads.value]);
+    adjustCustomerCredit(customers, s.customerId, -estimate);
+  };
+
+  return (
+    <div className="stack">
+      <div className="toolbar">
+        <Field label="Search">
+          <Input placeholder="Search..." value={q} onChange={(e)=>setQ(e.target.value)} />
+        </Field>
+        <Field label="Status">
+          <select value={status} onChange={(e)=>setStatus(e.target.value)}>
+            <option value="all">All</option>
+            {LOAD_STATUSES.map(x=><option key={x} value={x}>{x}</option>)}
+          </select>
+        </Field>
+        <Field label="Mode">
+          <select value={mode} onChange={(e)=>setMode(e.target.value)}>
+            <option value="all">All</option>
+            <option>Dray</option><option>TL</option><option>LTL</option><option>Parcel</option>
+          </select>
+        </Field>
+        <div className="spacer"></div>
+        <Btn className="primary" onClick={addNew}>New Load</Btn>
+      </div>
+      <Card>
+        <CardBody style={{padding:0}}>
+          <table>
+            <thead>
+              <tr>
+                <th>Load #</th><th>Origin</th><th>Stop #1</th><th>Destination</th><th>Carrier</th>
+                <th>Weight</th><th>Commodity</th><th>Container Size</th>
+                <th>Arrival</th><th>Last Free Day</th><th>Dispatch</th><th>Delivery</th><th>Time</th>
+                <th className="right">Carr $</th><th className="right">Cust $</th>
+                <th className="right">Margin $</th><th className="right">Margin %</th>
+                <th className="right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length? filtered.map(s => {
+                const t = calcLoadTotals(s);
+                return (
+                  <tr key={s.id}>
+                    <td><a className="link" onClick={()=>onOpen(s.id)}>{s.id}</a></td>
+                    <td>{s.origin||"—"}</td>
+                    <td>{s.stop1||"—"}</td>
+                    <td>{s.destination||"—"}</td>
+                    <td>{carname(s.carrierId)}</td>
+                    <td>{s.weight? s.weight+" lb" : "—"}</td>
+                    <td>{s.equipment||"—"}</td>
+                    <td>{s.containerNo? s.containerNo.slice(0,4)+"..." : "—"}</td>
+                    <td>{s.arrival||"—"}</td>
+                    <td>{s.lastFree||"—"}</td>
+                    <td>{s.dispatch||"—"}</td>
+                    <td>{s.delivery||"—"}</td>
+                    <td>{s.deliveryTime||"—"}</td>
+                    <td className="right">${money(t.carr)}</td>
+                    <td className="right">${money(t.cust)}</td>
+                    <td className="right">${money(t.margin)}</td>
+                    <td className="right">{t.cust>0? t.marginPct.toFixed(1)+"%":"—"}</td>
+                    <td className="right">
+                      <div className="row" style={{justifyContent:"flex-end"}}>
+                        <Btn onClick={()=>onOpen(s.id)}>Edit</Btn>
+                        <Btn onClick={()=>printBOL(s, (useNames().cname)(s.customerId), (useNames().carname)(s.carrierId))}>BOL</Btn>
+                      </div>
                     </td>
-                    <td className="p-2"><Input value={b.description||""} onChange={e=>{ const copy=[...form.billables]; copy[i]={...b, description:e.target.value}; u("billables", copy); }}/></td>
-                    <td className="p-2"><Input value={b.note||""} onChange={e=>{ const copy=[...form.billables]; copy[i]={...b, note:e.target.value}; u("billables", copy); }}/></td>
-                    <td className="p-2">{moneyCell(b.carrier||0, (n)=>{ const copy=[...form.billables]; copy[i]={...b, carrier:n}; u("billables", copy); })}</td>
-                    <td className="p-2">{moneyCell(b.customer||0, (n)=>{ const copy=[...form.billables]; copy[i]={...b, customer:n}; u("billables", copy); })}</td>
-                    <td className="p-2 text-right"><Btn variant="outline" size="sm" onClick={()=>delLine(b.id)}>Del</Btn></td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="text-right mt-2 text-sm">
-              Carrier ${totals.carr.toFixed(2)} · Customer ${totals.cust.toFixed(2)} · Margin ${margin(totals.cust, totals.carr).toFixed(2)} ({totals.cust>0? marginPct(totals.cust, totals.carr).toFixed(1)+"%":"—"})
-            </div>
-          </div>
+                );
+              }) : (
+                <tr><td colSpan="17" className="center muted">No loads.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
 
-          <div className="mt-4 flex items-center justify-between">
-            <div className="flex gap-2">
-              <Btn variant="outline" onClick={()=> printBOL({...form, customer:cname(ctx.customers, form.customerId), carrier: carname(ctx.carriers, form.carrierId)}) }>BOL</Btn>
-              <Btn variant="outline" onClick={syncInvoiceDraft}>Resync Draft Invoice</Btn>
-            </div>
-            <div className="flex gap-2">
-              <Btn variant="outline" onClick={onClose}>Cancel</Btn>
-              <Btn onClick={save}>Save</Btn>
-            </div>
-          </div>
-        </Modal>
-      );
+function LoadDetail({id, onClose}){
+  const { loads, customers, carriers, invoices } = useStores();
+  const { current } = useAuth();
+  const { cname } = useNames();
+  const s0 = loads.value.find(x=>x.id===id);
+  const [form, setForm] = useState(s0);
+  useEffect(()=>{ setForm(loads.value.find(x=>x.id===id)); }, [id, loads.value]);
+  if(!form) return null;
+
+  function u(k, v){ setForm({...form, [k]: v}); }
+  function setLine(i, patch){ const copy=[...form.billables]; copy[i] = {...copy[i], ...patch}; u("billables", copy); }
+
+  function ensureInvoiceDraftSync(load){
+    const list = [...invoices.value];
+    const idx = list.findIndex(x=>x.ref===load.id);
+    if(idx<0){
+      const lines = builInvoiceLinesFromLoad(load);
+      const total = round2(sum(lines.map(l=>l.amount)));
+      list.unshift({ id: uuid("INV-"), ref: load.id, customer: cname(load.customerId), status:"Draft", lines, taxPct:0, discount:0, total, agingDays:0 });
+      invoices.setValue(list);
+    }else{
+      const inv = list[idx];
+      if(inv.status==="Draft"){
+        const lines = builInvoiceLinesFromLoad(load);
+        const total = round2(sum(lines.map(l=>l.amount)));
+        list[idx] = {...inv, customer: cname(load.customerId), lines, total};
+        invoices.setValue(list);
+      }
     }
+  }
 
-    function CarriersView(){
-      const carriersLS = useLocalStorage("dp_carriers", seedCarriers);
-      const [editing, setEditing] = useState();
-      const [q,setQ]=useState("");
-      const filtered = useMemo(()=> (carriersLS.value||[]).filter(c=>(c.name||"").toLowerCase().includes(q.toLowerCase())), [carriersLS.value,q]);
-      const upsert = (c)=>{ const ex = (carriersLS.value||[]).some(x=>x.id===c.id); carriersLS.save(ex? (carriersLS.value||[]).map(x=>x.id===c.id?c:x): [c, ...(carriersLS.value||[])]); };
-      const remove = (id)=> carriersLS.save((carriersLS.value||[]).filter(x=>x.id!==id));
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Carriers</h3>
-            <div className="flex items-center gap-2">
-              <Input placeholder="Search…" value={q} onChange={e=>setQ(e.target.value)} className="w-56"/>
-              <Btn onClick={()=> setEditing({id:"CAR-"+(Math.floor(Math.random()*9000)+1000), name:"", flagged:false})}>+ New</Btn>
-            </div>
-          </div>
-          <Card>
-            <CardBody className="p-0 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="p-2 text-left">Name</th>
-                    <th className="p-2 text-left">MC#</th>
-                    <th className="p-2 text-left">DOT#</th>
-                    <th className="p-2 text-left">Auto Ins</th>
-                    <th className="p-2 text-left">Cargo Ins</th>
-                    <th className="p-2 text-left">Bond</th>
-                    <th className="p-2 text-left">Flag</th>
-                    <th className="p-2 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length? filtered.map(c=>(
-                    <tr key={c.id} className="odd:bg-white even:bg-gray-50">
-                      <td className="p-2 font-medium">{c.name||"—"}</td>
-                      <td className="p-2">{c.mcNumber||"—"}</td>
-                      <td className="p-2">{c.dotNumber||"—"}</td>
-                      <td className="p-2">{c.autoInsProvider||"—"} {c.autoPolicyNo?("#"+c.autoPolicyNo):""} {c.autoExp?("("+c.autoExp+")"):""}</td>
-                      <td className="p-2">{c.cargoInsProvider||"—"} {c.cargoPolicyNo?("#"+c.cargoPolicyNo):""} {c.cargoExp?("("+c.cargoExp+")"):""}</td>
-                      <td className="p-2">{c.bondDocUrl? <a href={c.bondDocUrl} target="_blank" rel="noreferrer">View</a> : "—"}</td>
-                      <td className="p-2">{c.flagged? <Badge tone="bad">Flagged</Badge> : <Badge>OK</Badge>}</td>
-                      <td className="p-2 text-right">
-                        <div className="flex justify-end gap-2">
-                          <Btn variant="outline" size="sm" onClick={()=>setEditing(c)}>Edit</Btn>
-                          <Btn variant="danger" size="sm" onClick={()=>remove(c.id)}>Del</Btn>
-                        </div>
-                      </td>
-                    </tr>
-                  )) : <tr><td className="p-6 text-center text-gray-500" colSpan={8}>No carriers.</td></tr>}
-                </tbody>
-              </table>
-            </CardBody>
-          </Card>
-          <EditCarrierDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert}/>
+  const save = ()=>{
+    const list = [...loads.value];
+    const idx = list.findIndex(x=>x.id===form.id);
+    if(idx<0) return;
+    // Credit recalculation:
+    // Compute previous customer charges and new charges; adjust delta against available credit.
+    const prevCust = sum((list[idx].billables||[]).map(b=>b.customer||0));
+    const newCust = sum((form.billables||[]).map(b=>b.customer||0));
+    const delta = prevCust - newCust; // if newCust bigger, delta negative => more hold
+    adjustCustomerCredit(customers, form.customerId, delta);
+    list[idx] = form;
+    loads.setValue(list);
+    ensureInvoiceDraftSync(form);
+    onClose();
+  };
+
+  return (
+    <Modal open={!!id} onClose={onClose} title={`Load Detail • ${form.id}`}>
+      <div className="grid grid-4">
+        <Field label="Customer">
+          <select value={form.customerId} onChange={(e)=>u("customerId", e.target.value)}>
+            {useStores().customers.value.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Carrier">
+          <select value={form.carrierId||""} onChange={(e)=>u("carrierId", e.target.value||undefined)}>
+            <option value="">—</option>
+            {useStores().carriers.value.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Mode">
+          <select value={form.mode} onChange={(e)=>u("mode", e.target.value)}>
+            <option>Dray</option><option>TL</option><option>LTL</option><option>Parcel</option>
+          </select>
+        </Field>
+        <Field label="Trade (Dray only)">
+          <select value={form.trade||"Import"} onChange={(e)=>u("trade", e.target.value)}>
+            <option>Import</option><option>Export</option>
+          </select>
+        </Field>
+
+        <Field label="Origin"><Input value={form.origin||""} onChange={(e)=>u("origin", e.target.value)} /></Field>
+        <Field label="Stop #1"><Input value={form.stop1||""} onChange={(e)=>u("stop1", e.target.value)} /></Field>
+        <Field label="Destination/Return Location"><Input value={form.destination||""} onChange={(e)=>u("destination", e.target.value)} /></Field>
+        <Field label="Status">
+          <select value={form.status} onChange={(e)=>u("status", e.target.value)}>
+            {LOAD_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+        </Field>
+
+        <Field label="Arrival"><input type="date" value={form.arrival||""} onChange={(e)=>u("arrival", e.target.value)} /></Field>
+        <Field label="Last Free Day"><input type="date" value={form.lastFree||""} onChange={(e)=>u("lastFree", e.target.value)} /></Field>
+        <Field label="Dispatch Date"><input type="date" value={form.dispatch||""} onChange={(e)=>u("dispatch", e.target.value)} /></Field>
+        <Field label="Delivery Date"><input type="date" value={form.delivery||""} onChange={(e)=>u("delivery", e.target.value)} /></Field>
+        <Field label="Delivery Time"><Input value={form.deliveryTime||""} onChange={(e)=>u("deliveryTime", e.target.value)} /></Field>
+
+        <Field label="Equipment"><Input value={form.equipment||""} onChange={(e)=>u("equipment", e.target.value)} /></Field>
+        <Field label="Container #"><Input value={form.containerNo||""} onChange={(e)=>u("containerNo", e.target.value)} /></Field>
+        <Field label="Chassis #"><Input value={form.trailerNo||""} onChange={(e)=>u("trailerNo", e.target.value)} /></Field>
+        <div></div>
+
+        <Field label="Hazmat?">
+          <input type="checkbox" checked={!!form.hazmat} onChange={(e)=>u("hazmat", e.target.checked)} /> <span className="muted">Check if hazmat</span>
+        </Field>
+        <Field label="Hazmat Class (1-9)"><Input value={form.hazmatClass||""} onChange={(e)=>u("hazmatClass", e.target.value)} /></Field>
+        <Field label="Tanker Endorsed?">
+          <input type="checkbox" checked={!!form.tankerEndorsed} onChange={(e)=>u("tankerEndorsed", e.target.checked)} /> <span className="muted">Driver needs tanker endorsement</span>
+        </Field>
+        <div></div>
+
+        <Field label="Weight (lb)">
+          <NumInput defaultValue={money(form.weight||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("weight", parseMoney(e.target.value))} />
+        </Field>
+        <Field label="Shipment Value ($)">
+          <NumInput defaultValue={money(form.shipmentValue||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("shipmentValue", parseMoney(e.target.value))} />
+        </Field>
+      </div>
+
+      <h3>Billables</h3>
+      <div className="row" style={{justifyContent:"space-between"}}>
+        <div className="row">
+          <select defaultValue="" onChange={(e)=>{ if(e.target.value){ u("billables", [...form.billables, {id:uuid("B-"), type:e.target.value, description:e.target.value, carrier:0, customer:0}]); e.target.value=""; } }}>
+            <option value="">Quick add...</option>
+            {BILLABLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <Btn onClick={()=>u("billables",[...form.billables, {id:uuid("B-"), type:"Linehaul", description:"Linehaul", carrier:0, customer:0}])}>+ Line</Btn>
         </div>
-      );
-    }
-    function EditCarrierDialog({value, onClose, onSave}){
-      const [form,setForm] = useState(value);
-      useEffect(()=>{ if(value) setForm(value); },[value]);
-      if(!form) return null;
-      const u = (k,v)=> setForm({...form,[k]:v});
-      const save = ()=>{ onSave(form); onClose(); };
-      return (
-        <Modal open={!!value} onClose={onClose} title={"Edit Carrier • "+form.id}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="md:col-span-3"><Label>Name</Label><Input value={form.name||""} onChange={e=>u("name", e.target.value)}/></div>
-            <div><Label>MC#</Label><Input value={form.mcNumber||""} onChange={e=>u("mcNumber", e.target.value)}/></div>
-            <div><Label>DOT#</Label><Input value={form.dotNumber||""} onChange={e=>u("dotNumber", e.target.value)}/></div>
-            <div className="md:col-span-3"><Label>Bond Document URL</Label><Input value={form.bondDocUrl||""} onChange={e=>u("bondDocUrl", e.target.value)} placeholder="https://..."/></div>
-            <div><Label>Auto Insurance Provider</Label><Input value={form.autoInsProvider||""} onChange={e=>u("autoInsProvider", e.target.value)}/></div>
-            <div><Label>Policy #</Label><Input value={form.autoPolicyNo||""} onChange={e=>u("autoPolicyNo", e.target.value)}/></div>
-            <div><Label>Expiration</Label><Input type="date" value={form.autoExp||""} onChange={e=>u("autoExp", e.target.value)}/></div>
-            <div><Label>Cargo Insurance Provider</Label><Input value={form.cargoInsProvider||""} onChange={e=>u("cargoInsProvider", e.target.value)}/></div>
-            <div><Label>Policy #</Label><Input value={form.cargoPolicyNo||""} onChange={e=>u("cargoPolicyNo", e.target.value)}/></div>
-            <div><Label>Expiration</Label><Input type="date" value={form.cargoExp||""} onChange={e=>u("cargoExp", e.target.value)}/></div>
-            <div className="md:col-span-3">
-              <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!!form.flagged} onChange={e=>u("flagged", e.target.checked)}/> Flag carrier</label>
-            </div>
-          </div>
-          <div className="mt-4 flex items-center justify-end gap-2">
-            <Btn variant="outline" onClick={onClose}>Cancel</Btn>
-            <Btn onClick={save}>Save</Btn>
-          </div>
-        </Modal>
-      );
-    }
-
-    function CustomersView({ctx}){
-      const customersLS = ctx.customersLS;
-      const [editing, setEditing] = useState();
-      const [q,setQ]=useState("");
-      const filtered = useMemo(()=> (customersLS.value||[]).filter(c=>(c.name||"").toLowerCase().includes(q.toLowerCase())), [customersLS.value,q]);
-      const upsert = (c)=>{ const ex=(customersLS.value||[]).some(x=>x.id===c.id); customersLS.save(ex? (customersLS.value||[]).map(x=>x.id===c.id?c:x): [c, ...(customersLS.value||[])]); };
-      const remove = (id)=> customersLS.save((customersLS.value||[]).filter(x=>x.id!==id));
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Customers</h3>
-            <div className="flex items-center gap-2">
-              <Input placeholder="Search…" value={q} onChange={e=>setQ(e.target.value)} className="w-56"/>
-              <Btn onClick={()=> setEditing({id:"CUST-"+(Math.floor(Math.random()*9000)+1000), name:"", creditActive:true, creditTerms:"Net-30", availableCredit:0, totalBalance:0})}>+ New</Btn>
-            </div>
-          </div>
-          <Card>
-            <CardBody className="p-0 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="p-2 text-left">Name</th>
-                    <th className="p-2 text-left">Terms</th>
-                    <th className="p-2 text-left">Available Credit</th>
-                    <th className="p-2 text-left">Total Balance</th>
-                    <th className="p-2 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length? filtered.map(c=>(
-                    <tr key={c.id} className="odd:bg-white even:bg-gray-50">
-                      <td className="p-2 font-medium">{c.name}</td>
-                      <td className="p-2">{c.creditTerms}</td>
-                      <td className="p-2">${moneyStr(c.availableCredit)}</td>
-                      <td className="p-2">${moneyStr(c.totalBalance)}</td>
-                      <td className="p-2 text-right">
-                        <div className="flex justify-end gap-2">
-                          <Btn variant="outline" size="sm" onClick={()=>setEditing(c)}>Edit</Btn>
-                          <Btn variant="danger" size="sm" onClick={()=>remove(c.id)}>Del</Btn>
-                        </div>
-                      </td>
-                    </tr>
-                  )) : <tr><td className="p-6 text-center text-gray-500" colSpan={5}>No customers.</td></tr>}
-                </tbody>
-              </table>
-            </CardBody>
-          </Card>
-          <EditCustomerDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert}/>
+        <div className="row">
+          <Btn onClick={()=>printBOL(form, cname(form.customerId), (useNames().carname)(form.carrierId))}>BOL</Btn>
         </div>
-      );
-    }
-    function EditCustomerDialog({value, onClose, onSave}){
-      const [form,setForm] = useState(value);
-      useEffect(()=>{ if(value) setForm(value); },[value]);
-      if(!form) return null;
-      const u = (k,v)=> setForm({...form,[k]:v});
-      const save = ()=>{ onSave(form); onClose(); };
-      return (
-        <Modal open={!!value} onClose={onClose} title={"Edit Customer • "+form.id}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="md:col-span-3"><Label>Name</Label><Input value={form.name||""} onChange={e=>u("name", e.target.value)}/></div>
-            <div><Label>Terms</Label>
-              <select className="h-9 border rounded px-2 w-full" value={form.creditTerms} onChange={e=>u("creditTerms", e.target.value)}>
-                {CREDIT_TERMS.map(t=><option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div><Label>Available Credit</Label><NumberInput defaultValue={moneyStr(form.availableCredit||0)} onBlur={snapMoneyBlur} onChange={e=>u("availableCredit", parseMoney(e.target.value))}/></div>
-            <div><Label>Total Balance</Label><NumberInput defaultValue={moneyStr(form.totalBalance||0)} onBlur={snapMoneyBlur} onChange={e=>u("totalBalance", parseMoney(e.target.value))}/></div>
-            <div className="md:col-span-3">
-              <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!!form.creditActive} onChange={e=>u("creditActive", e.target.checked)}/> Credit Active</label>
-            </div>
-          </div>
-          <div className="mt-4 flex items-center justify-end gap-2">
-            <Btn variant="outline" onClick={onClose}>Cancel</Btn>
-            <Btn onClick={save}>Save</Btn>
-          </div>
-        </Modal>
-      );
-    }
-
-    function BillingView({ctx}){
-      const invoicesLS = ctx.invoicesLS;
-      const [editing, setEditing] = useState();
-      const [q,setQ]=useState(""), [flt,setFlt]=useState("All");
-      const filtered = useMemo(()=> (invoicesLS.value||[]).filter(inv=>
-        (flt==="All"||inv.status===flt) && [inv.id, inv.ref, inv.customerName].some(x=>(x||"").toLowerCase().includes(q.toLowerCase()))
-      ),[invoicesLS.value,q,flt]);
-      const upsert = (inv)=>{
-        const list=[...(invoicesLS.value||[])];
-        const i=list.findIndex(x=>x.id===inv.id);
-        if(i>=0) list[i]=inv; else list.unshift(inv);
-        invoicesLS.save(list);
-      };
-      const remove = (id)=> invoicesLS.save((invoicesLS.value||[]).filter(x=>x.id!==id));
-      const badgeTone = (s)=> s==="Paid"?"ok": s==="Sent"?"warn": s==="Void"?"bad":"muted";
-      const csv = ()=>{
-        const rows = filtered.map(i=>({
-          id:i.id, customer:i.customerName, ref:i.ref||"", status:i.status, issuedOn:i.issuedOn, dueOn:i.dueOn||"", total: moneyStr(i.total||0),
-          age: ageDays(i.issuedOn), pastDue: i.status==="Paid"?0: Math.max(0, ageDays(i.dueOn||i.issuedOn))
-        }));
-        const data = csvCRLF(rows);
-        const url = URL.createObjectURL(new Blob([data], {type:"text/csv;charset=utf-8;"}));
-        const a=document.createElement("a"); a.href=url; a.download="invoices.csv"; a.click(); URL.revokeObjectURL(url);
-      };
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Billing</h3>
-            <div className="flex items-center gap-2">
-              <Input placeholder="Search…" value={q} onChange={e=>setQ(e.target.value)} className="w-56"/>
-              <select className="h-9 border rounded px-2" value={flt} onChange={e=>setFlt(e.target.value)}>
-                <option>All</option><option>Draft</option><option>Sent</option><option>Paid</option><option>Void</option>
-              </select>
-              <Btn variant="outline" onClick={csv}>Export CSV</Btn>
-            </div>
-          </div>
-          <Card>
-            <CardBody className="p-0 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50"><tr>
-                  <th className="p-2 text-left">ID</th>
-                  <th className="p-2 text-left">Customer</th>
-                  <th className="p-2 text-left">Ref</th>
-                  <th className="p-2 text-left">Status</th>
-                  <th className="p-2 text-left">Issued</th>
-                  <th className="p-2 text-left">Due</th>
-                  <th className="p-2 text-left">Age</th>
-                  <th className="p-2 text-left">Past Due</th>
-                  <th className="p-2 text-right">Total</th>
-                  <th className="p-2 text-right">Actions</th>
-                </tr></thead>
-                <tbody>
-                  {filtered.length? filtered.map(inv=>(
-                    <tr key={inv.id} className="odd:bg-white even:bg-gray-50">
-                      <td className="p-2 font-medium">{inv.id}</td>
-                      <td className="p-2">{inv.customerName}</td>
-                      <td className="p-2">{inv.ref||"—"}</td>
-                      <td className="p-2"><Badge tone={badgeTone(inv.status)}>{inv.status}</Badge></td>
-                      <td className="p-2">{inv.issuedOn}</td>
-                      <td className="p-2">{inv.dueOn||"—"}</td>
-                      <td className="p-2">{ageDays(inv.issuedOn)} d</td>
-                      <td className="p-2">{inv.status==="Paid"? "0 d" : Math.max(0, ageDays(inv.dueOn||inv.issuedOn))+" d"}</td>
-                      <td className="p-2 text-right">${(inv.total||0).toFixed(2)}</td>
-                      <td className="p-2 text-right">
-                        <div className="flex justify-end gap-2">
-                          <Btn variant="outline" size="sm" onClick={()=>setEditing(inv)} disabled={inv.status!=="Draft"}>Edit</Btn>
-                          <Btn variant="outline" size="sm" onClick={()=>printInvoicePDF(inv)} disabled={inv.status==="Void"}>PDF</Btn>
-                          <Btn variant="danger" size="sm" onClick={()=>remove(inv.id)}>Del</Btn>
-                        </div>
-                      </td>
-                    </tr>
-                  )) : <tr><td className="p-6 text-center text-gray-500" colSpan={10}>No invoices.</td></tr>}
-                </tbody>
-              </table>
-            </CardBody>
-          </Card>
-          <EditInvoiceDialog value={editing} onClose={()=>setEditing(undefined)} onSave={(inv)=>{
-            // if status transitioned to Paid -> restore credit
-            const before = (invoicesLS.value||[]).find(x=>x.id===inv.id);
-            if(before && before.status!=="Paid" && inv.status==="Paid"){
-              ctx.setCustomers((ctx.customers||[]).map(c=> c.id===inv.customerId? {...c, availableCredit: round2((c.availableCredit||0) + (inv.total||0))} : c));
-            }
-            // if Draft -> recompute total on save
-            const sub = round2((inv.lines||[]).reduce((t,l)=> t + (Number(l.amount)||0), 0));
-            const total = round2(sub + ((inv.taxPct||0)/100)*sub - (inv.discount||0));
-            upsert({...inv, total});
-          }}/>
-        </div>
-      );
-    }
-    function EditInvoiceDialog({value, onClose, onSave}){
-      const [form,setForm] = useState(value);
-      useEffect(()=>{ if(value) setForm(value); },[value]);
-      if(!form) return null;
-      const u = (k,v)=> setForm({...form,[k]:v});
-      const addLine = (type)=> setForm({...form, lines:[...(form.lines||[]), {id:"L"+(Math.floor(Math.random()*9000)+1000), type:type||"Linehaul", description:type||"Linehaul", note:"", amount:0}]});
-      const delLine = (id)=> setForm({...form, lines:(form.lines||[]).filter(l=>l.id!==id)});
-      const setAmt = (i,v)=>{ const copy=[...(form.lines||[])]; copy[i]={...copy[i], amount:v}; u("lines", copy); };
-      const total = useMemo(()=>{
-        const sub = (form.lines||[]).reduce((t,l)=> t + (Number(l.amount)||0), 0);
-        return round2(sub + ((form.taxPct||0)/100)*sub - (form.discount||0));
-      },[form.lines, form.taxPct, form.discount]);
-      useEffect(()=>{ u("total", total); },[total]);
-      const save = ()=>{ onSave(form); onClose(); };
-      return (
-        <Modal open={!!value} onClose={onClose} title={"Edit Invoice • "+form.id} width={920}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div><Label>Customer</Label><Input value={form.customerName} onChange={e=>u("customerName", e.target.value)}/></div>
-            <div><Label>Reference (Load)</Label><Input value={form.ref||""} onChange={e=>u("ref", e.target.value)}/></div>
-            <div><Label>Status</Label>
-              <select className="h-9 border rounded px-2 w-full" value={form.status} onChange={e=>u("status", e.target.value)}>
-                <option>Draft</option><option>Sent</option><option>Paid</option><option>Void</option>
-              </select>
-            </div>
-          </div>
-          <div className="mt-4">
-            <div className="flex items-center justify-between">
-              <Label className="!mb-0">Lines</Label>
-              <div className="flex items-center gap-2">
-                <select className="h-9 border rounded px-2" defaultValue="" onChange={e=>{ if(e.target.value){ addLine(e.target.value); e.target.value=""; } }}>
-                  <option value="">Quick add…</option>
-                  {BILLABLE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+      </div>
+      <table style={{marginTop:8}}>
+        <thead>
+          <tr><th>Type</th><th>Description</th><th>Note</th><th className="right">Carrier $</th><th className="right">Customer $</th><th className="right">Actions</th></tr>
+        </thead>
+        <tbody>
+          {form.billables.map((b,i)=>(
+            <tr key={b.id}>
+              <td>
+                <select value={b.type} onChange={(e)=>setLine(i,{type:e.target.value})}>
+                  {BILLABLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-                <Btn variant="outline" onClick={()=>addLine("Linehaul")}>+ Line</Btn>
-              </div>
-            </div>
-            <table className="w-full text-sm mt-2">
-              <thead className="bg-gray-50"><tr>
-                <th className="p-2 text-left">Type</th>
-                <th className="p-2 text-left">Description</th>
-                <th className="p-2 text-left">Note</th>
-                <th className="p-2 text-right">Amount</th>
-                <th className="p-2 text-right">Actions</th>
-              </tr></thead>
-              <tbody>
-                {(form.lines||[]).map((l,i)=>(
-                  <tr key={l.id} className="odd:bg-white even:bg-gray-50">
-                    <td className="p-2">
-                      <select className="h-9 border rounded px-2" value={l.type} onChange={e=>{ const copy=[...form.lines]; copy[i]={...l, type:e.target.value}; u("lines", copy); }}>
-                        {BILLABLE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
-                      </select>
-                    </td>
-                    <td className="p-2"><Input value={l.description||""} onChange={e=>{ const copy=[...form.lines]; copy[i]={...l, description:e.target.value}; u("lines", copy); }}/></td>
-                    <td className="p-2"><Input value={l.note||""} onChange={e=>{ const copy=[...form.lines]; copy[i]={...l, note:e.target.value}; u("lines", copy); }}/></td>
-                    <td className="p-2"><NumberInput defaultValue={moneyStr(l.amount)} onBlur={snapMoneyBlur} onChange={e=>{ setAmt(i, parseMoney(e.target.value)); }}/></td>
-                    <td className="p-2 text-right"><Btn variant="outline" size="sm" onClick={()=>delLine(l.id)}>Del</Btn></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <div><Label>Tax %</Label><NumberInput defaultValue={String(form.taxPct??0)} onBlur={snapMoneyBlur} onChange={e=>u("taxPct", parseMoney(e.target.value))}/></div>
-            <div><Label>Discount $</Label><NumberInput defaultValue={moneyStr(form.discount||0)} onBlur={snapMoneyBlur} onChange={e=>u("discount", parseMoney(e.target.value))}/></div>
-            <div className="self-end text-right font-semibold">Total: ${total.toFixed(2)}</div>
-          </div>
-          <div className="mt-4 flex items-center justify-end gap-2">
-            <Btn variant="outline" onClick={onClose}>Cancel</Btn>
-            <Btn onClick={save} disabled={form.status!=="Draft" && form.status!=="Sent" && form.status!=="Paid" && form.status!=="Void" ? true : false}>Save</Btn>
-          </div>
-        </Modal>
-      );
-    }
+              </td>
+              <td><Input value={b.description||""} onChange={(e)=>setLine(i,{description:e.target.value})} /></td>
+              <td><Input value={b.note||""} onChange={(e)=>setLine(i,{note:e.target.value})} /></td>
+              <td className="right"><NumInput defaultValue={money(b.carrier||0)} onBlur={snapMoneyBlur} onChange={(e)=>setLine(i,{carrier: parseMoney(e.target.value)})} /></td>
+              <td className="right"><NumInput defaultValue={money(b.customer||0)} onBlur={snapMoneyBlur} onChange={(e)=>setLine(i,{customer: parseMoney(e.target.value)})} /></td>
+              <td className="right"><Btn className="danger" onClick={()=>u("billables", form.billables.filter(x=>x.id!==b.id))}>Del</Btn></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
-    function StorageView({ctx}){
-      const storageLS = ctx.storageLS;
-      const [editing, setEditing] = useState();
-      const [q,setQ]=useState("");
-      const filtered = useMemo(()=> (storageLS.value||[]).filter(s=> (cname(ctx.customers, s.customerId)||"").toLowerCase().includes(q.toLowerCase())), [storageLS.value,q,ctx.customers]);
-      const upsert = (s)=>{ const ex=(storageLS.value||[]).some(x=>x.id===s.id); storageLS.save(ex? (storageLS.value||[]).map(x=>x.id===s.id?s:x): [s, ...(storageLS.value||[])]); };
-      const remove = (id)=> storageLS.save((storageLS.value||[]).filter(x=>x.id!==id));
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">WMS Storage</h3>
-            <div className="flex items-center gap-2">
-              <Input placeholder="Search customer…" value={q} onChange={e=>setQ(e.target.value)} className="w-56"/>
-              <Btn onClick={()=> setEditing({
-                id:"STO-"+(Math.floor(Math.random()*9000)+1000),
-                customerId: ctx.customers[0]?.id || "",
-                warehouse:"Acme Transportation University Park - 2545 Palmer Ave, University Park, IL 60484",
-                units:0, unitDesc:"Pallets",
-                hazmat:false, hazmatClass:"", costPerDay:0, weight:0, insuredValue:0, commodity:"", startDate: todayISO(), value:0
-              })}>+ New</Btn>
-            </div>
-          </div>
-          <Card>
-            <CardBody className="p-0 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50"><tr>
-                  <th className="p-2 text-left">ID</th>
-                  <th className="p-2 text-left">Customer</th>
-                  <th className="p-2 text-left">Warehouse</th>
-                  <th className="p-2 text-left">Units</th>
-                  <th className="p-2 text-left">Unit Desc</th>
-                  <th className="p-2 text-left">Commodity</th>
-                  <th className="p-2 text-left">Weight</th>
-                  <th className="p-2 text-left">Cost/Day</th>
-                  <th className="p-2 text-left">Insured Value</th>
-                  <th className="p-2 text-right">Actions</th>
-                </tr></thead>
-                <tbody>
-                  {filtered.length? filtered.map(s=>(
-                    <tr key={s.id} className="odd:bg-white even:bg-gray-50">
-                      <td className="p-2 font-medium">{s.id}</td>
-                      <td className="p-2">{cname(ctx.customers, s.customerId)}</td>
-                      <td className="p-2">{s.warehouse}</td>
-                      <td className="p-2">{s.units}</td>
-                      <td className="p-2">{s.unitDesc||"—"}</td>
-                      <td className="p-2">{s.commodity||"—"}</td>
-                      <td className="p-2">{s.weight? (s.weight+" lb") : "—"}</td>
-                      <td className="p-2">${moneyStr(s.costPerDay||0)}/day</td>
-                      <td className="p-2">${moneyStr(s.insuredValue||0)}</td>
-                      <td className="p-2 text-right"><div className="flex justify-end gap-2">
-                        <Btn variant="outline" size="sm" onClick={()=>setEditing(s)}>Edit</Btn>
-                        <Btn variant="danger" size="sm" onClick={()=>remove(s.id)}>Del</Btn>
-                      </div></td>
-                    </tr>
-                  )) : <tr><td className="p-6 text-center text-gray-500" colSpan={10}>No storage orders.</td></tr>}
-                </tbody>
-              </table>
-            </CardBody>
-          </Card>
-          <EditStorageDialog value={editing} onClose={()=>setEditing(undefined)} onSave={upsert} customers={ctx.customers}/>
+      <div className="row" style={{justifyContent:"flex-end", marginTop:12, gap:8}}>
+        <Btn onClick={onClose}>Cancel</Btn>
+        <Btn className="primary" onClick={save}>Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/** ================== Carriers ================== */
+function CarriersView(){
+  const { carriers } = useStores();
+  const [q,setQ] = useState("");
+  const [editing, setEditing] = useState(null);
+  const filtered = useMemo(()=> (carriers.value||[]).filter(c => {
+    const hay = [c.name, c.mc, c.dot].map(x=>String(x||"").toLowerCase()).join(" ");
+    return hay.includes(q.toLowerCase());
+  }), [carriers.value, q]);
+
+  return (
+    <div className="stack">
+      <div className="toolbar">
+        <Field label="Search"><Input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Name, MC#, DOT#"/></Field>
+        <div className="spacer"></div>
+        <Btn className="primary" onClick={()=>setEditing({ id: uuid("CAR-"), name:"", flagged:false })}>New Carrier</Btn>
+      </div>
+      <Card>
+        <CardBody style={{padding:0}}>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th><th>MC#</th><th>DOT#</th><th>Auto Ins</th><th>Cargo Ins</th><th>Bond</th><th>Flag</th><th className="right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length? filtered.map(c => (
+                <tr key={c.id}>
+                  <td>{c.name||"—"}</td>
+                  <td>{c.mc||"—"}</td>
+                  <td>{c.dot||"—"}</td>
+                  <td>{(c.autoProvider||"—") + (c.autoPolicy? " #"+c.autoPolicy:"") + (c.autoExp? " ("+c.autoExp+")":"")}</td>
+                  <td>{(c.cargoProvider||"—") + (c.cargoPolicy? " #"+c.cargoPolicy:"") + (c.cargoExp? " ("+c.cargoExp+")":"")}</td>
+                  <td>{c.bondUrl? <a className="link" href={c.bondUrl} target="_blank" rel="noreferrer">View</a> : "—"}</td>
+                  <td>{c.flagged? <Badge tone="bad">Flagged</Badge> : <Badge>OK</Badge>}</td>
+                  <td className="right">
+                    <div className="row" style={{justifyContent:"flex-end"}}>
+                      <Btn onClick={()=>setEditing(c)}>Edit</Btn>
+                    </div>
+                  </td>
+                </tr>
+              )) : <tr><td className="center muted" colSpan="8">No carriers.</td></tr>}
+            </tbody>
+          </table>
+        </CardBody>
+      </Card>
+
+      <CarrierDialog value={editing} onClose={()=>setEditing(null)} onSave={(v)=>{
+        const list = [...carriers.value];
+        const idx = list.findIndex(x=>x.id===v.id);
+        if(idx>=0) list[idx]=v; else list.unshift(v);
+        carriers.setValue(list);
+        setEditing(null);
+      }}/>
+    </div>
+  );
+}
+function CarrierDialog({value, onClose, onSave}){
+  const [form,setForm] = useState(value);
+  useEffect(()=>setForm(value||null), [value]);
+  if(!form) return null;
+  const u = (k,v)=> setForm({...form,[k]:v});
+  return (
+    <Modal open={!!value} onClose={onClose} title={`Carrier • ${form.id}`}>
+      <div className="grid grid-3">
+        <Field label="Name"><Input value={form.name||""} onChange={(e)=>u("name", e.target.value)} /></Field>
+        <Field label="MC#"><Input value={form.mc||""} onChange={(e)=>u("mc", e.target.value)} /></Field>
+        <Field label="DOT#"><Input value={form.dot||""} onChange={(e)=>u("dot", e.target.value)} /></Field>
+
+        <Field label="Bond Document URL"><Input value={form.bondUrl||""} onChange={(e)=>u("bondUrl", e.target.value)} placeholder="https://..."/></Field>
+        <Field label="Auto Ins Provider"><Input value={form.autoProvider||""} onChange={(e)=>u("autoProvider", e.target.value)} /></Field>
+        <Field label="Auto Policy #"><Input value={form.autoPolicy||""} onChange={(e)=>u("autoPolicy", e.target.value)} /></Field>
+        <Field label="Auto Expiration"><input type="date" value={form.autoExp||""} onChange={(e)=>u("autoExp", e.target.value)} /></Field>
+
+        <Field label="Cargo Ins Provider"><Input value={form.cargoProvider||""} onChange={(e)=>u("cargoProvider", e.target.value)} /></Field>
+        <Field label="Cargo Policy #"><Input value={form.cargoPolicy||""} onChange={(e)=>u("cargoPolicy", e.target.value)} /></Field>
+        <Field label="Cargo Expiration"><input type="date" value={form.cargoExp||""} onChange={(e)=>u("cargoExp", e.target.value)} /></Field>
+
+        <Field label="Accounts Receivable Name"><Input value={form.arName||""} onChange={(e)=>u("arName", e.target.value)} /></Field>
+        <Field label="AR Email"><Input value={form.arEmail||""} onChange={(e)=>u("arEmail", e.target.value)} /></Field>
+        <Field label="AR Phone"><Input value={form.arPhone||""} onChange={(e)=>u("arPhone", e.target.value)} /></Field>
+        <Field label="AR Address"><Input value={form.arAddress||""} onChange={(e)=>u("arAddress", e.target.value)} /></Field>
+
+        <div className="row"><input type="checkbox" checked={!!form.flagged} onChange={(e)=>u("flagged", e.target.checked)} /> <span className="muted">Flag carrier</span></div>
+      </div>
+      <div className="row" style={{justifyContent:"flex-end", marginTop:12, gap:8}}>
+        <Btn onClick={onClose}>Cancel</Btn>
+        <Btn className="primary" onClick={()=>onSave(form)}>Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/** ================== Customers ================== */
+function CustomersView(){
+  const { customers } = useStores();
+  const [editing, setEditing] = useState(null);
+  const [q,setQ] = useState("");
+  const filtered = useMemo(()=> customers.value.filter(c => [c.id, c.name, c.apEmail, c.opsEmail].join(" ").toLowerCase().includes(q.toLowerCase())), [customers.value, q]);
+  return (
+    <div className="stack">
+      <div className="toolbar">
+        <Field label="Search"><Input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Name, ID, contact"/></Field>
+        <div className="spacer"></div>
+        <Btn className="primary" onClick={()=>setEditing({ id: uuid("CUST-"), name:"", availableCredit:0, totalBalance:0, terms:"Net-30" })}>New Customer</Btn>
+      </div>
+      <Card>
+        <CardBody style={{padding:0}}>
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Name</th><th>Avail. Credit</th><th>Total Balance</th><th>Terms</th><th className="right">Actions</th></tr>
+            </thead>
+            <tbody>
+              {filtered.length? filtered.map(c => (
+                <tr key={c.id}>
+                  <td>{c.id}</td>
+                  <td>{c.name}</td>
+                  <td>${money(c.availableCredit||0)}</td>
+                  <td>${money(c.totalBalance||0)}</td>
+                  <td>{c.terms}</td>
+                  <td className="right"><Btn onClick={()=>setEditing(c)}>Edit</Btn></td>
+                </tr>
+              )) : <tr><td className="center muted" colSpan="6">No customers.</td></tr>}
+            </tbody>
+          </table>
+        </CardBody>
+      </Card>
+
+      <CustomerDialog value={editing} onClose={()=>setEditing(null)} onSave={(v)=>{
+        const list = [...customers.value];
+        const idx = list.findIndex(x=>x.id===v.id);
+        if(idx>=0) list[idx]=v; else list.unshift(v);
+        customers.setValue(list);
+        setEditing(null);
+      }}/>
+    </div>
+  );
+}
+function CustomerDialog({value, onClose, onSave}){
+  const [form, setForm] = useState(value);
+  useEffect(()=>setForm(value||null), [value]);
+  if(!form) return null;
+  const u = (k,v)=> setForm({...form,[k]:v});
+  return (
+    <Modal open={!!value} onClose={onClose} title={`Customer • ${form.id}`}>
+      <div className="grid grid-3">
+        <Field label="Name"><Input value={form.name||""} onChange={(e)=>u("name", e.target.value)} /></Field>
+        <Field label="Available Credit ($)"><NumInput defaultValue={money(form.availableCredit||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("availableCredit", parseMoney(e.target.value))} /></Field>
+        <Field label="Total Balance ($)"><NumInput defaultValue={money(form.totalBalance||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("totalBalance", parseMoney(e.target.value))} /></Field>
+        <Field label="Terms">
+          <select value={form.terms||"Net-30"} onChange={(e)=>u("terms", e.target.value)}>
+            <option>Pre-pay</option><option>Pay Upon Delivery</option><option>Net-30</option><option>Net-45</option><option>Net-60</option>
+          </select>
+        </Field>
+
+        <Field label="AP Contact Name"><Input value={form.apName||""} onChange={(e)=>u("apName", e.target.value)} /></Field>
+        <Field label="AP Phone"><Input value={form.apPhone||""} onChange={(e)=>u("apPhone", e.target.value)} /></Field>
+        <Field label="AP E-Mail"><Input value={form.apEmail||""} onChange={(e)=>u("apEmail", e.target.value)} /></Field>
+        <Field label="AP Mailing Address"><Input value={form.apAddress||""} onChange={(e)=>u("apAddress", e.target.value)} /></Field>
+
+        <Field label="Ops/Tender Name"><Input value={form.opsName||""} onChange={(e)=>u("opsName", e.target.value)} /></Field>
+        <Field label="Ops/Tender Phone"><Input value={form.opsPhone||""} onChange={(e)=>u("opsPhone", e.target.value)} /></Field>
+        <Field label="Ops/Tender E-Mail"><Input value={form.opsEmail||""} onChange={(e)=>u("opsEmail", e.target.value)} /></Field>
+        <Field label="Ops/Tender Address"><Input value={form.opsAddress||""} onChange={(e)=>u("opsAddress", e.target.value)} /></Field>
+
+        <div className="row">
+          <label><input type="checkbox" checked={!!form.prefInvoiceMail} onChange={(e)=>u("prefInvoiceMail", e.target.checked)} /> Mail</label>
+          <label style={{marginLeft:12}}><input type="checkbox" checked={!!form.prefInvoiceEmail} onChange={(e)=>u("prefInvoiceEmail", e.target.checked)} /> E-Mail</label>
+          <label style={{marginLeft:12}}><input type="checkbox" checked={!!form.prefInvoiceFax} onChange={(e)=>u("prefInvoiceFax", e.target.checked)} /> Fax</label>
         </div>
-      );
-    }
-    function EditStorageDialog({value, onClose, onSave, customers}){
-      const [form,setForm] = useState(value);
-      useEffect(()=>{ if(value) setForm(value); },[value]);
-      if(!form) return null;
-      const u = (k,v)=> setForm({...form,[k]:v});
-      const save = ()=>{ onSave(form); onClose(); };
-      return (
-        <Modal open={!!value} onClose={onClose} title={"Storage • "+form.id}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div><Label>Customer</Label>
-              <select className="h-9 border rounded px-2 w-full" value={form.customerId} onChange={e=>u("customerId", e.target.value)}>
-                {customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="md:col-span-2"><Label>Warehouse</Label><Input value={form.warehouse||""} onChange={e=>u("warehouse", e.target.value)}/></div>
-            <div><Label>Units</Label><NumberInput defaultValue={String(form.units??0)} onBlur={snapMoneyBlur} onChange={e=>u("units", parseMoney(e.target.value))}/></div>
-            <div><Label>Unit Description</Label>
-              <select className="h-9 border rounded px-2 w-full" value={form.unitDesc||"Pallets"} onChange={e=>u("unitDesc", e.target.value)}>
-                {["Pallets","Barrels","Totes","Commodity"].map(o=><option key={o} value={o}>{o}</option>)}
-              </select>
-            </div>
-            <div><Label>Commodity</Label><Input value={form.commodity||""} onChange={e=>u("commodity", e.target.value)}/></div>
-            <div><Label>Weight (lb)</Label><NumberInput defaultValue={String(form.weight??0)} onBlur={snapMoneyBlur} onChange={e=>u("weight", parseMoney(e.target.value))}/></div>
-            <div><Label>Cost per Day ($)</Label><NumberInput defaultValue={moneyStr(form.costPerDay||0)} onBlur={snapMoneyBlur} onChange={e=>u("costPerDay", parseMoney(e.target.value))}/></div>
-            <div><Label>Insured Value ($)</Label><NumberInput defaultValue={moneyStr(form.insuredValue||0)} onBlur={snapMoneyBlur} onChange={e=>u("insuredValue", parseMoney(e.target.value))}/></div>
-            <div><Label>Order Value ($)</Label><NumberInput defaultValue={moneyStr(form.value||0)} onBlur={snapMoneyBlur} onChange={e=>u("value", parseMoney(e.target.value))}/></div>
-            <div><Label>Hazmat</Label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={!!form.hazmat} onChange={e=>u("hazmat", e.target.checked)}/> Is Hazmat</label>
-            </div>
-            {form.hazmat? (
-              <div className="md:col-span-2"><Label>Hazmat Class</Label>
-                <select className="h-9 border rounded px-2 w-full" value={form.hazmatClass||""} onChange={e=>u("hazmatClass", e.target.value)}>
-                  {[
-                    "1 Explosives","2 Gases","3 Flammable Liquid and Combustible Liquid",
-                    "4 Flammable Solid, Spontaneously Combustible and Dangerous When Wet",
-                    "5 Oxidizer and Organic Peroxide","6 Poison (Toxic) and Poison Inhalation Hazard",
-                    "7 Radioactive","8 Corrosive","9 Miscellaneous Hazardous Materials"
-                  ].map(h=><option key={h} value={h}>{h}</option>)}
+
+        <Field label="Credit Application URL"><Input value={form.creditAppUrl||""} onChange={(e)=>u("creditAppUrl", e.target.value)} placeholder="https://..."/></Field>
+        <Field label="Billing Instructions URL"><Input value={form.billingInstrUrl||""} onChange={(e)=>u("billingInstrUrl", e.target.value)} placeholder="https://..."/></Field>
+      </div>
+      <div className="row" style={{justifyContent:"flex-end", marginTop:12, gap:8}}>
+        <Btn onClick={onClose}>Cancel</Btn>
+        <Btn className="primary" onClick={()=>onSave(form)}>Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/** ================== Billing ================== */
+function BillingView(){
+  const { invoices, customers } = useStores();
+  const { current } = useAuth();
+  const [editing, setEditing] = useState(null);
+  const [q,setQ] = useState("");
+  const [flt, setFlt] = useState("All");
+
+  // update aging days each render based on invoiceDate
+  useEffect(()=>{
+    const list = invoices.value.map(inv => {
+      const agingDays = inv.invoiceDate ? Math.max(0, daysBetween(inv.invoiceDate, today())) : 0;
+      return {...inv, agingDays};
+    });
+    invoices.setValue(list);
+    // eslint-disable-next-line
+  }, []);
+
+  const filtered = useMemo(()=> (invoices.value||[]).filter(inv =>
+    (flt==="All" || inv.status===flt) && [inv.id, inv.ref, inv.customer].some(x => String(x||"").toLowerCase().includes(q.toLowerCase()))
+  ), [invoices.value, q, flt]);
+
+  const badgeTone = (s)=> s==="Paid" ? "ok" : s==="Sent" ? "warn" : s==="Void" ? "bad" : "";
+
+  return (
+    <div className="stack">
+      <div className="toolbar">
+        <Field label="Search"><Input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="ID, ref, customer"/></Field>
+        <Field label="Status">
+          <select value={flt} onChange={(e)=>setFlt(e.target.value)}>
+            <option>All</option><option>Draft</option><option>Sent</option><option>Paid</option><option>Void</option>
+          </select>
+        </Field>
+        <div className="spacer"></div>
+        <Btn className="primary" onClick={()=> setEditing({ id: uuid("INV-"), ref:"", customer: customers.value[0]?.name||"", status:"Draft", invoiceDate:"", lines:[{id:uuid("L-"), type:"Linehaul", description:"Charge", note:"", amount:0}], taxPct:0, discount:0, total:0, agingDays:0 })}>New Invoice</Btn>
+      </div>
+
+      <Card>
+        <CardBody style={{padding:0}}>
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Customer</th><th>Ref</th><th>Status</th><th>Invoice Date</th><th>Aging (days)</th><th className="right">Total</th><th className="right">Actions</th></tr>
+            </thead>
+            <tbody>
+              {filtered.length? filtered.map(inv => (
+                <tr key={inv.id}>
+                  <td>{inv.id}</td>
+                  <td>{inv.customer}</td>
+                  <td>{inv.ref||"—"}</td>
+                  <td><Badge tone={badgeTone(inv.status)}>{inv.status}</Badge></td>
+                  <td>{inv.invoiceDate||"—"}</td>
+                  <td>{inv.agingDays||0}</td>
+                  <td className="right">${money(inv.total||0)}</td>
+                  <td className="right">
+                    <div className="row" style={{justifyContent:"flex-end"}}>
+                      <Btn onClick={()=>setEditing(inv)} disabled={inv.status!=="Draft"}>Edit</Btn>
+                      <Btn onClick={()=>{
+                        const list=[...invoices.value];
+                        const idx=list.findIndex(x=>x.id===inv.id);
+                        if(idx<0) return;
+                        const setInvoiceDate = (d)=>{ list[idx] = {...list[idx], invoiceDate: d }; invoices.setValue(list); };
+                        printInvoicePDF(list[idx], setInvoiceDate);
+                      }} disabled={inv.status==="Void"}>PDF</Btn>
+                      <Btn className="warn" onClick={()=>{
+                        const list=[...invoices.value];
+                        const idx=list.findIndex(x=>x.id===inv.id);
+                        if(idx<0) return;
+                        list[idx] = {...list[idx], status:"Sent", invoiceDate: list[idx].invoiceDate || today() };
+                        invoices.setValue(list);
+                      }}>Mark Sent</Btn>
+                      <Btn className="ok" onClick={()=>{
+                        if(current.role!=="Admin"){ alert("Only Admin can mark Paid."); return; }
+                        const list=[...invoices.value];
+                        const idx=list.findIndex(x=>x.id===inv.id);
+                        if(idx<0) return;
+                        // refund available credit by invoice total
+                        const cust = customers.value.find(c=>c.name===inv.customer);
+                        if(cust){ adjustCustomerCredit(useStores().customers, cust.id, inv.total||0); }
+                        list[idx] = {...list[idx], status:"Paid", invoiceDate: list[idx].invoiceDate || today() };
+                        invoices.setValue(list);
+                      }}>Mark Paid</Btn>
+                    </div>
+                  </td>
+                </tr>
+              )) : <tr><td className="center muted" colSpan="8">No invoices.</td></tr>}
+            </tbody>
+          </table>
+        </CardBody>
+      </Card>
+
+      <InvoiceDialog value={editing} onClose={()=>setEditing(null)} onSave={(v)=>{
+        const list=[...invoices.value];
+        const idx=list.findIndex(x=>x.id===v.id);
+        if(idx>=0) list[idx]=v; else list.unshift(v);
+        invoices.setValue(list);
+        setEditing(null);
+      }}/>
+    </div>
+  );
+}
+function InvoiceDialog({value, onClose, onSave}){
+  const [form,setForm] = useState(value);
+  useEffect(()=>setForm(value||null), [value]);
+  if(!form) return null;
+  const u = (k,v)=> setForm({...form,[k]:v});
+  const setLine = (i, patch)=>{
+    const copy=[...form.lines]; copy[i] = {...copy[i], ...patch}; u("lines", copy);
+    // recalc total
+    const sub = sum(copy.map(l=>l.amount||0));
+    const tax = ((form.taxPct||0)/100)*sub;
+    u("total", round2(sub + tax - (form.discount||0)));
+  };
+  useEffect(()=>{
+    const sub = sum((form.lines||[]).map(l=>l.amount||0));
+    const tax = ((form.taxPct||0)/100)*sub;
+    u("total", round2(sub + tax - (form.discount||0)));
+    // eslint-disable-next-line
+  }, [form.taxPct, form.discount]);
+
+  return (
+    <Modal open={!!value} onClose={onClose} title={`Invoice • ${form.id}`}>
+      <div className="grid grid-3">
+        <Field label="Customer"><Input value={form.customer} onChange={(e)=>u("customer", e.target.value)} /></Field>
+        <Field label="Reference (Load)"><Input value={form.ref||""} onChange={(e)=>u("ref", e.target.value)} /></Field>
+        <Field label="Status">
+          <select value={form.status} onChange={(e)=>u("status", e.target.value)}>
+            <option>Draft</option><option>Sent</option><option>Paid</option><option>Void</option>
+          </select>
+        </Field>
+        <Field label="Invoice Date"><input type="date" value={form.invoiceDate||""} onChange={(e)=>u("invoiceDate", e.target.value)} /></Field>
+      </div>
+
+      <h3>Lines</h3>
+      <div className="row" style={{justifyContent:"space-between"}}>
+        <select defaultValue="" onChange={(e)=>{ if(e.target.value){ u("lines",[...form.lines,{id:uuid("L-"), type:e.target.value, description:e.target.value, note:"", amount:0 }]); e.target.value=""; } }}>
+          <option value="">Quick add...</option>
+          {BILLABLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <Btn onClick={()=>u("lines",[...form.lines,{id:uuid("L-"), type:"Linehaul", description:"Linehaul", note:"", amount:0 }])}>+ Line</Btn>
+      </div>
+
+      <table style={{marginTop:8}}>
+        <thead><tr><th>Type</th><th>Description</th><th>Note</th><th className="right">Amount</th><th className="right">Actions</th></tr></thead>
+        <tbody>
+          {form.lines.map((l,i)=>(
+            <tr key={l.id}>
+              <td>
+                <select value={l.type} onChange={(e)=>setLine(i,{type:e.target.value})}>
+                  {BILLABLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-              </div>
-            ): null}
-            <div><Label>Start Date</Label><Input type="date" value={form.startDate||""} onChange={e=>u("startDate", e.target.value)}/></div>
-          </div>
-          <div className="mt-4 flex items-center justify-end gap-2">
-            <Btn variant="outline" onClick={onClose}>Cancel</Btn>
-            <Btn onClick={save}>Save</Btn>
-          </div>
-        </Modal>
-      );
-    }
+              </td>
+              <td><Input value={l.description||""} onChange={(e)=>setLine(i,{description:e.target.value})} /></td>
+              <td><Input value={l.note||""} onChange={(e)=>setLine(i,{note:e.target.value})} /></td>
+              <td className="right"><NumInput defaultValue={money(l.amount||0)} onBlur={snapMoneyBlur} onChange={(e)=>setLine(i,{amount: parseMoney(e.target.value)})}/></td>
+              <td className="right"><Btn className="danger" onClick={()=>u("lines", form.lines.filter(x=>x.id!==l.id))}>Del</Btn></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
-    /************ APP SHELL ************/
-    function App(){
-      const customersLS = useLocalStorage("dp_customers", seedCustomers);
-      const carriersLS = useLocalStorage("dp_carriers", seedCarriers);
-      const loadsLS = useLocalStorage("dp_loads", seedLoads);
-      const invoicesLS = useLocalStorage("dp_invoices", seedInvoices);
-      const storageLS = useLocalStorage("dp_storage", seedStorage);
-      const [tab,setTab] = useState("loads");
-      const [openId, setOpenId] = useState(null);
-      const ctx = { customers: customersLS.value||[], setCustomers: customersLS.save, carriers: carriersLS.value||[], invoicesLS, storageLS,
-        customersLS };
-
-      const currentLoad = (loadsLS.value||[]).find(s=>s.id===openId);
-
-      const upsertLoad = (s)=>{
-        const exists = (loadsLS.value||[]).some(x=>x.id===s.id);
-        const next = exists? (loadsLS.value||[]).map(x=>x.id===s.id? s: x) : [s, ...(loadsLS.value||[])];
-        loadsLS.save(next);
-        // invoice auto-create on first save already handled by LoadBoard newLoad; here we only resync via modal button.
-      };
-
-      return (
-        <div className="max-w-7xl mx-auto p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="text-xl font-semibold">DrayagePro TMS + WMS</div>
-            <div className="flex items-center gap-2">
-              <Btn variant={tab==="loads"?"primary":"outline"} onClick={()=>setTab("loads")}>Load Board</Btn>
-              <Btn variant={tab==="carriers"?"primary":"outline"} onClick={()=>setTab("carriers")}>Carriers</Btn>
-              <Btn variant={tab==="customers"?"primary":"outline"} onClick={()=>setTab("customers")}>Customers</Btn>
-              <Btn variant={tab==="billing"?"primary":"outline"} onClick={()=>setTab("billing")}>Billing</Btn>
-              <Btn variant={tab==="wms"?"primary":"outline"} onClick={()=>setTab("wms")}>WMS</Btn>
-            </div>
-          </div>
-
-          {tab==="loads" && <LoadBoard ctx={ctx} loadsLS={loadsLS} invoicesLS={invoicesLS} onOpen={setOpenId}/>}
-          {tab==="carriers" && <CarriersView/>}
-          {tab==="customers" && <CustomersView ctx={{customersLS}}/>}
-          {tab==="billing" && <BillingView ctx={{invoicesLS, customers: customersLS.value||[], setCustomers: customersLS.save}}/>}
-          {tab==="wms" && <StorageView ctx={{storageLS, customers: customersLS.value||[]}}/>}
-
-          <EditLoad ctx={{customers: customersLS.value||[], carriers: carriersLS.value||[], setCustomers: customersLS.save}}
-            value={currentLoad} onClose={()=>setOpenId(null)} onSave={upsertLoad} invoicesLS={invoicesLS}/>
+      <div className="grid grid-3" style={{marginTop:8}}>
+        <Field label="Tax %"><NumInput defaultValue={String(form.taxPct||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("taxPct", parseMoney(e.target.value))} /></Field>
+        <Field label="Discount $"><NumInput defaultValue={money(form.discount||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("discount", parseMoney(e.target.value))} /></Field>
+        <div className="row" style={{alignItems:"end", justifyContent:"flex-end"}}>
+          <div><b>Total: ${money(form.total||0)}</b></div>
         </div>
-      );
-    }
+      </div>
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-  </script>
+      <div className="row" style={{justifyContent:"flex-end", marginTop:12, gap:8}}>
+        <Btn onClick={onClose}>Cancel</Btn>
+        <Btn className="primary" onClick={()=>onSave(form)} disabled={form.status!=="Draft"}>Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/** ================== WMS (Storage) ================== */
+function WMSView(){
+  const { storageOrders, customers } = useStores();
+  const [q,setQ] = useState("");
+  const [editing,setEditing] = useState(null);
+  const filtered = useMemo(()=> (storageOrders.value||[]).filter(o => {
+    const hay = [o.id, o.warehouse, o.note].join(" ").toLowerCase();
+    return hay.includes(q.toLowerCase());
+  }), [storageOrders.value, q]);
+
+  const addNew = ()=> setEditing({
+    id: uuid("STO-"), customerId: customers.value[0]?.id || "",
+    warehouse: "Acme Transportation University Park - 2545 Palmer Ave, University Park, IL 60484",
+    units:0, unitDesc:"Pallets", unitWeight:0, dailyRate:0, estDays:1, valueTotal:0,
+    hazmat:false, hazmatClass:"", insuredValue:0, note:""
+  });
+
+  return (
+    <div className="stack">
+      <div className="toolbar">
+        <Field label="Search"><Input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search..." /></Field>
+        <div className="spacer"></div>
+        <Btn className="primary" onClick={addNew}>New Storage Order</Btn>
+      </div>
+
+      <Card>
+        <CardBody style={{padding:0}}>
+          <table>
+            <thead>
+              <tr><th>Order #</th><th>Customer</th><th>Warehouse</th><th>Units</th><th>Unit Desc</th><th>Daily Rate</th><th>Hazmat</th><th>Insured Value</th><th className="right">Actions</th></tr>
+            </thead>
+            <tbody>
+              {filtered.length? filtered.map(o => (
+                <tr key={o.id}>
+                  <td>{o.id}</td>
+                  <td>{(customers.value.find(c=>c.id===o.customerId)||{}).name||"—"}</td>
+                  <td>{o.warehouse}</td>
+                  <td>{o.units}</td>
+                  <td>{o.unitDesc||"—"}</td>
+                  <td>${money(o.dailyRate)}</td>
+                  <td>{o.hazmat? `Yes ${o.hazmatClass||""}`:"No"}</td>
+                  <td>${money(o.insuredValue||0)}</td>
+                  <td className="right"><Btn onClick={()=>setEditing(o)}>Edit</Btn></td>
+                </tr>
+              )) : <tr><td className="center muted" colSpan="9">No storage orders.</td></tr>}
+            </tbody>
+          </table>
+        </CardBody>
+      </Card>
+
+      <StorageDialog value={editing} onClose={()=>setEditing(null)} onSave={(v)=>{
+        // Credit logic: hold first-day storage estimated charges (units * dailyRate)
+        const cust = customers.value.find(c=>c.id===v.customerId);
+        const estimate = round2((v.units||0)*(v.dailyRate||0));
+        if(cust){
+          adjustCustomerCredit(useStores().customers, v.customerId, -estimate);
+        }
+        const list=[...storageOrders.value];
+        const idx=list.findIndex(x=>x.id===v.id);
+        if(idx>=0) list[idx]=v; else list.unshift(v);
+        storageOrders.setValue(list);
+        setEditing(null);
+      }}/>
+    </div>
+  );
+}
+function StorageDialog({value, onClose, onSave}){
+  const { customers } = useStores();
+  const [form,setForm] = useState(value);
+  useEffect(()=>setForm(value||null), [value]);
+  if(!form) return null;
+  const u=(k,v)=> setForm({...form,[k]:v});
+  return (
+    <Modal open={!!value} onClose={onClose} title={`Storage Order • ${form.id}`}>
+      <div className="grid grid-3">
+        <Field label="Customer">
+          <select value={form.customerId} onChange={(e)=>u("customerId", e.target.value)}>
+            {customers.value.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Warehouse"><Input value={form.warehouse} onChange={(e)=>u("warehouse", e.target.value)} /></Field>
+        <Field label="Units"><NumInput defaultValue={String(form.units||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("units", parseMoney(e.target.value))} /></Field>
+
+        <Field label="Unit Description"><Input value={form.unitDesc||""} onChange={(e)=>u("unitDesc", e.target.value)} placeholder="Pallets, barrels, totes, etc."/></Field>
+        <Field label="Unit Weight (lb)"><NumInput defaultValue={money(form.unitWeight||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("unitWeight", parseMoney(e.target.value))} /></Field>
+        <Field label="Daily Rate ($)"><NumInput defaultValue={money(form.dailyRate||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("dailyRate", parseMoney(e.target.value))} /></Field>
+
+        <Field label="Estimated Days"><NumInput defaultValue={String(form.estDays||1)} onBlur={snapMoneyBlur} onChange={(e)=>u("estDays", parseMoney(e.target.value))} /></Field>
+        <Field label="Insured Value ($)"><NumInput defaultValue={money(form.insuredValue||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("insuredValue", parseMoney(e.target.value))} /></Field>
+        <Field label="Total Value ($)"><NumInput defaultValue={money(form.valueTotal||0)} onBlur={snapMoneyBlur} onChange={(e)=>u("valueTotal", parseMoney(e.target.value))} /></Field>
+
+        <div className="row">
+          <label><input type="checkbox" checked={!!form.hazmat} onChange={(e)=>u("hazmat", e.target.checked)} /> Hazmat</label>
+          <Input style={{marginLeft:8}} placeholder="Class (1-9)" value={form.hazmatClass||""} onChange={(e)=>u("hazmatClass", e.target.value)} />
+        </div>
+
+        <Field label="Notes"><TextArea value={form.note||""} onChange={(e)=>u("note", e.target.value)} /></Field>
+      </div>
+
+      <div className="row" style={{justifyContent:"flex-end", marginTop:12, gap:8}}>
+        <Btn onClick={onClose}>Cancel</Btn>
+        <Btn className="primary" onClick={()=>onSave(form)}>Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/** ================== Mount ================== */
+function Root(){
+  return (
+    <Providers>
+      <AppShell/>
+    </Providers>
+  );
+}
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<Root/>);
+</script>
 </body>
 </html>
